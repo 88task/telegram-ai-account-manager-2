@@ -90,3 +90,18 @@ pnpm worker:auth
 ```bash
 pnpm worker:start
 ```
+
+
+### 6. Launch the AI Management Panel Web Dashboard
+```bash
+pnpm web:dev
+# Access the dashboard at http://localhost:3000
+```
+**Dashboard Capabilities:**
+- **Emergency Kill Switch:** Instant halt button to kill all automated Telegram replies.
+- **Operating Mode Switch:** Toggle between Manual, Draft, and Auto-Pilot on the fly.
+- **Group & Chat Scope:** Whitelist Telegram groups and manage blocked user IDs dynamically.
+- **Approval Queue:** One-click review, inline edit, and dispatch for high-risk / low-confidence replies.
+- **Conversation Triage:** Real-time visibility into unanswered messages, reply necessity, and chat history.
+- **LUMO Knowledge & Feedback Memory:** Stored safety rules, 24 supported Indian banks, and few-shot exemplars.
+- **Audit Logs:** Full traceability for every AI perception, model evaluation, and human action.

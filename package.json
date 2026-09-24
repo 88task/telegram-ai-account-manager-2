@@ -10,7 +10,10 @@
     "worker:auth": "pnpm --filter @telegram-ai/worker auth",
     "worker:start": "pnpm --filter @telegram-ai/worker start",
     "db:push": "pnpm --filter @telegram-ai/db push",
-    "db:studio": "pnpm --filter @telegram-ai/db studio"
+    "db:studio": "pnpm --filter @telegram-ai/db studio",
+    "web:dev": "pnpm --filter @telegram-ai/web dev",
+    "web:start": "pnpm --filter @telegram-ai/web start",
+    "web:build": "pnpm --filter @telegram-ai/web build"
   },
   "devDependencies": {
     "turbo": "^2.0.0",

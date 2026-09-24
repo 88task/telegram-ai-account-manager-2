@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Telegram AI Account Manager</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+            },
+            darkbg: '#0b0f19',
+            darkcard: '#111827',
+            darkborder: '#1f2937'
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background-color: #0b0f19; color: #f3f4f6; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    .glass-card { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
+    .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #374151; border-radius: 9999px; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- Top Navbar -->
+  <header class="glass-card sticky top-0 z-50 border-b border-gray-800 px-6 py-3.5 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-sky-500/20">
+        <i class="fa-solid fa-brain text-lg"></i>
+      </div>
+      <div>
+        <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
+          Telegram AI Manager
+          <span class="text-xs px-2 py-0.5 rounded-full font-medium bg-sky-500/10 text-sky-400 border border-sky-500/20">LUMO Personal Daemon</span>
+        </h1>
+        <p class="text-xs text-gray-400" id="session-status-text">Checking MTProto socket...</p>
+      </div>
+    </div>
+
+    <!-- Center Mode Controls -->
+    <div class="flex items-center gap-2 bg-gray-900/90 border border-gray-800 p-1 rounded-xl">
+      <button onclick="setOperatingMode('manual')" id="mode-btn-manual" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all text-gray-400 hover:text-white">
+        <i class="fa-solid fa-hand mr-1.5"></i>Manual
+      </button>
+      <button onclick="setOperatingMode('draft')" id="mode-btn-draft" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all text-gray-400 hover:text-white">
+        <i class="fa-solid fa-pen mr-1.5"></i>Draft
+      </button>
+      <button onclick="setOperatingMode('auto_pilot')" id="mode-btn-auto_pilot" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all bg-sky-500/20 text-sky-400 border border-sky-500/30">
+        <i class="fa-solid fa-robot mr-1.5"></i>Auto-Pilot
+      </button>
+    </div>
+
+    <!-- Right Controls -->
+    <div class="flex items-center gap-3">
+      <!-- Emergency Kill Switch -->
+      <button onclick="toggleKillSwitch()" id="kill-switch-btn" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 transition-all hover:bg-emerald-500/20">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" id="kill-switch-dot"></span>
+        <span id="kill-switch-text">Kill Switch: OFF</span>
+      </button>
+
+      <!-- Disconnect Telegram -->
+      <button onclick="disconnectSession()" class="px-3 py-1.5 rounded-xl text-xs font-medium text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 transition-all">
+        <i class="fa-solid fa-power-off mr-1"></i>Disconnect
+      </button>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="border-b border-gray-800 bg-gray-900/60 px-6 flex gap-6 text-sm font-medium">
+    <button onclick="switchTab('overview')" class="tab-link py-3 border-b-2 border-sky-500 text-sky-400 flex items-center gap-2" id="tab-overview">
+      <i class="fa-solid fa-chart-pie"></i> Overview
+    </button>
+    <button onclick="switchTab('approvals')" class="tab-link py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2" id="tab-approvals">
+      <i class="fa-solid fa-inbox"></i> Approval Queue
+      <span id="badge-approvals" class="px-1.5 py-0.2 rounded-full text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 hidden">0</span>
+    </button>
+    <button onclick="switchTab('conversations')" class="tab-link py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2" id="tab-conversations">
+      <i class="fa-solid fa-comments"></i> Conversations & Triage
+      <span id="badge-unanswered" class="px-1.5 py-0.2 rounded-full text-xs bg-rose-500/20 text-rose-300 border border-rose-500/30 hidden">0</span>
+    </button>
+    <button onclick="switchTab('scope')" class="tab-link py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2" id="tab-scope">
+      <i class="fa-solid fa-shield-halved"></i> Groups & Blocking
+    </button>
+    <button onclick="switchTab('knowledge')" class="tab-link py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2" id="tab-knowledge">
+      <i class="fa-solid fa-book-bookmark"></i> LUMO Knowledge & Memory
+    </button>
+    <button onclick="switchTab('audit')" class="tab-link py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2" id="tab-audit">
+      <i class="fa-solid fa-clock-rotate-left"></i> Audit Logs
+    </button>
+  </nav>
+
+  <!-- Main Content Areas -->
+  <main class="flex-1 p-6 max-w-7xl mx-auto w-full custom-scroll overflow-y-auto">
+
+    <!-- 1. OVERVIEW VIEW -->
+    <div id="view-overview" class="space-y-6">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="glass-card rounded-2xl p-5">
+          <div class="flex items-center justify-between text-gray-400 text-xs">
+            <span>UNANSWERED CHATS</span>
+            <i class="fa-solid fa-triangle-exclamation text-rose-400 text-base"></i>
+          </div>
+          <div class="mt-3 text-2xl font-bold text-white" id="stat-unanswered">0</div>
+          <p class="text-xs text-rose-400 mt-1">Requires reply detection active</p>
+        </div>
+
+        <div class="glass-card rounded-2xl p-5">
+          <div class="flex items-center justify-between text-gray-400 text-xs">
+            <span>PENDING APPROVALS</span>
+            <i class="fa-solid fa-hand-holding-hand text-amber-400 text-base"></i>
+          </div>
+          <div class="mt-3 text-2xl font-bold text-white" id="stat-approvals">0</div>
+          <p class="text-xs text-amber-400 mt-1">Sensitive topics or low confidence</p>
+        </div>
+
+        <div class="glass-card rounded-2xl p-5">
+          <div class="flex items-center justify-between text-gray-400 text-xs">
+            <span>ACTIVE CONVERSATIONS</span>
+            <i class="fa-solid fa-message text-sky-400 text-base"></i>
+          </div>
+          <div class="mt-3 text-2xl font-bold text-white" id="stat-total-chats">0</div>
+          <p class="text-xs text-gray-400 mt-1">Private 1-on-1s & Whitelisted groups</p>
+        </div>
+
+        <div class="glass-card rounded-2xl p-5">
+          <div class="flex items-center justify-between text-gray-400 text-xs">
+            <span>BLOCKED USERS</span>
+            <i class="fa-solid fa-ban text-gray-400 text-base"></i>
+          </div>
+          <div class="mt-3 text-2xl font-bold text-white" id="stat-blocked">0</div>
+          <p class="text-xs text-gray-400 mt-1">Silently dropped from AI pipeline</p>
+        </div>
+      </div>
+
+      <!-- Live Safety & Pipeline Status -->
+      <div class="glass-card rounded-2xl p-6 border border-gray-800">
+        <h2 class="text-base font-bold text-white mb-4 flex items-center gap-2">
+          <i class="fa-solid fa-shield-virus text-sky-400"></i>
+          Five-Layer Protection Pipeline Status
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-3 text-xs">
+          <div class="p-3 rounded-xl bg-gray-900/80 border border-gray-800">
+            <span class="text-sky-400 font-semibold block mb-1">Layer 1: Scope</span>
+            <p class="text-gray-400">Drop channels, non-whitelisted groups, and blocked users</p>
+          </div>
+          <div class="p-3 rounded-xl bg-gray-900/80 border border-gray-800">
+            <span class="text-sky-400 font-semibold block mb-1">Layer 2: Triage</span>
+            <p class="text-gray-400">Classify necessity, ignore conversational closings</p>
+          </div>
+          <div class="p-3 rounded-xl bg-gray-900/80 border border-gray-800">
+            <span class="text-sky-400 font-semibold block mb-1">Layer 3: Safety Guard</span>
+            <p class="text-gray-400">Flag disputes, scams, payments, 3 strikes to human review</p>
+          </div>
+          <div class="p-3 rounded-xl bg-gray-900/80 border border-gray-800">
+            <span class="text-sky-400 font-semibold block mb-1">Layer 4: Cognitive Brain</span>
+            <p class="text-gray-400">Amazon Nova Pro multimodal + LUMO Memory + Self-Critique</p>
+          </div>
+          <div class="p-3 rounded-xl bg-gray-900/80 border border-gray-800">
+            <span class="text-sky-400 font-semibold block mb-1">Layer 5: Dispatch</span>
+            <p class="text-gray-400">Send with natural typing latency or queue in Dashboard</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. APPROVAL QUEUE VIEW -->
+    <div id="view-approvals" class="space-y-4 hidden">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-bold text-white">Human Approval Queue</h2>
+          <p class="text-xs text-gray-400">Review AI suggestions for sensitive topics, scam accusations, disputes, or low-confidence replies</p>
+        </div>
+        <button onclick="loadApprovals()" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs text-gray-200">
+          <i class="fa-solid fa-arrows-rotate mr-1"></i>Refresh
+        </button>
+      </div>
+
+      <div id="approvals-container" class="space-y-4">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <!-- 3. CONVERSATIONS & TRIAGE VIEW -->
+    <div id="view-conversations" class="hidden h-[750px] flex gap-4">
+      <!-- Left List -->
+      <div class="w-80 glass-card rounded-2xl flex flex-col overflow-hidden border border-gray-800">
+        <div class="p-3 border-b border-gray-800 flex gap-2">
+          <button onclick="filterConversations('all')" class="flex-1 py-1 rounded-lg text-xs font-medium bg-gray-800 text-gray-300 hover:text-white" id="filter-all">All</button>
+          <button onclick="filterConversations('unanswered')" class="flex-1 py-1 rounded-lg text-xs font-medium text-gray-400 hover:text-white" id="filter-unanswered">Unanswered</button>
+          <button onclick="filterConversations('review')" class="flex-1 py-1 rounded-lg text-xs font-medium text-gray-400 hover:text-white" id="filter-review">Review</button>
+        </div>
+        <div id="conversations-list" class="flex-1 overflow-y-auto custom-scroll divide-y divide-gray-800/50">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Right Chat Transcript -->
+      <div class="flex-1 glass-card rounded-2xl flex flex-col overflow-hidden border border-gray-800" id="chat-pane">
+        <div class="p-4 border-b border-gray-800 flex items-center justify-between">
+          <div>
+            <h3 class="text-sm font-bold text-white" id="selected-chat-title">Select a conversation</h3>
+            <p class="text-xs text-gray-400" id="selected-chat-info">Click any chat from the left panel to inspect</p>
+          </div>
+          <div id="chat-actions" class="hidden flex gap-2">
+            <button onclick="blockSelectedUser()" class="px-2.5 py-1 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20">
+              <i class="fa-solid fa-user-slash mr-1"></i>Block User
+            </button>
+          </div>
+        </div>
+
+        <div id="chat-messages" class="flex-1 p-4 overflow-y-auto custom-scroll space-y-3">
+          <div class="h-full flex items-center justify-center text-gray-500 text-xs">No conversation selected</div>
+        </div>
+
+        <div class="p-3 border-t border-gray-800 flex gap-2 bg-gray-900/50" id="chat-reply-bar">
+          <input type="text" id="manual-reply-input" placeholder="Type a manual reply to send immediately..." class="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500" disabled>
+          <button onclick="sendManualReply()" id="manual-reply-btn" class="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-medium transition-all" disabled>
+            <i class="fa-solid fa-paper-plane mr-1"></i>Send
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. GROUPS & CHAT BLOCKING VIEW -->
+    <div id="view-scope" class="space-y-6 hidden">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        <!-- Whitelisted Allowed Groups -->
+        <div class="glass-card rounded-2xl p-6 border border-gray-800 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-base font-bold text-white flex items-center gap-2">
+                <i class="fa-solid fa-users text-sky-400"></i>
+                Allowed Groups Whitelist
+              </h3>
+              <p class="text-xs text-gray-400 mt-0.5">By default, all Telegram groups are ignored. Whitelist specific group IDs here.</p>
+            </div>
+          </div>
+
+          <div class="flex gap-2">
+            <input type="text" id="new-group-id-input" placeholder="Telegram Group ID (e.g. -100192837465)" class="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-500">
+            <button onclick="addAllowedGroup()" class="px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-medium">
+              <i class="fa-solid fa-plus mr-1"></i>Add Group
+            </button>
+          </div>
+
+          <div class="border border-gray-800 rounded-xl overflow-hidden">
+            <div id="allowed-groups-list" class="divide-y divide-gray-800 text-xs">
+              <!-- Populated dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Blocked Users & Blocked Chats -->
+        <div class="glass-card rounded-2xl p-6 border border-gray-800 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-base font-bold text-white flex items-center gap-2">
+                <i class="fa-solid fa-user-slash text-rose-400"></i>
+                Blocked Users & Chats
+              </h3>
+              <p class="text-xs text-gray-400 mt-0.5">Messages from these Telegram user IDs will be dropped instantly without AI reply or triage.</p>
+            </div>
+          </div>
+
+          <div class="flex gap-2">
+            <input type="text" id="new-blocked-id-input" placeholder="Telegram User/Chat ID (e.g. 987654321)" class="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500">
+            <button onclick="addBlockedUser()" class="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-medium">
+              <i class="fa-solid fa-ban mr-1"></i>Block ID
+            </button>
+          </div>
+
+          <div class="border border-gray-800 rounded-xl overflow-hidden">
+            <div id="blocked-users-list" class="divide-y divide-gray-800 text-xs">
+              <!-- Populated dynamically -->
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 5. LUMO KNOWLEDGE & MEMORY VIEW -->
+    <div id="view-knowledge" class="space-y-6 hidden">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-bold text-white">LUMO Knowledge Base & Few-Shot Memory</h2>
+          <p class="text-xs text-gray-400">Reference safety tips, banking rules, and learned feedback exemplars</p>
+        </div>
+        <button onclick="toggleNewKnowledgeModal()" class="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium">
+          <i class="fa-solid fa-plus mr-1"></i>Add Knowledge Item
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+        <div class="glass-card rounded-2xl p-4 border border-gray-800">
+          <span class="font-bold text-sky-400 block mb-2"><i class="fa-solid fa-building-columns mr-1"></i>Supported Banks (24)</span>
+          <p class="text-gray-300 leading-relaxed">SBI, BoB, BoI, Bank of Maharashtra, Canara, CBI, IOB, Indian Bank, PNB, Punjab & Sind, UCO, Union Bank, HDFC, ICICI, Kotak, IndusInd, YES, IDFC FIRST, Federal, Bandhan, South Indian, RBL, City Union, IDBI.</p>
+        </div>
+        <div class="glass-card rounded-2xl p-4 border border-gray-800">
+          <span class="font-bold text-emerald-400 block mb-2"><i class="fa-solid fa-shield-halved mr-1"></i>WhatsApp Safety Tips</span>
+          <p class="text-gray-300 leading-relaxed">Chat with 3-5 trusted daily contacts, 5 voice calls (3m), 3 video calls (10m), join communities, 2-3 status updates daily. Never bind same WhatsApp on multiple task platforms.</p>
+        </div>
+        <div class="glass-card rounded-2xl p-4 border border-gray-800">
+          <span class="font-bold text-amber-400 block mb-2"><i class="fa-solid fa-coins mr-1"></i>Earning & Withdrawal</span>
+          <p class="text-gray-300 leading-relaxed">Rs. 4 per sent task message. Referral reward: Rs. 20 + 16% lifetime after friend completes 20 valid tasks + adds valid bank. Withdrawals processed within 24 hours.</p>
+        </div>
+      </div>
+
+      <div class="glass-card rounded-2xl p-4 border border-gray-800">
+        <h3 class="text-sm font-bold text-white mb-3">Stored Knowledge & Feedback Exemplars</h3>
+        <div id="knowledge-items-list" class="space-y-3">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. AUDIT LOGS VIEW -->
+    <div id="view-audit" class="space-y-4 hidden">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-bold text-white">System Audit & Activity Logs</h2>
+          <p class="text-xs text-gray-400">Timestamped record of every incoming event, AI evaluation, dispatch, and human override</p>
+        </div>
+        <button onclick="loadAuditLogs()" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs text-gray-200">
+          <i class="fa-solid fa-arrows-rotate mr-1"></i>Refresh
+        </button>
+      </div>
+
+      <div class="glass-card rounded-2xl overflow-hidden border border-gray-800">
+        <table class="w-full text-left text-xs text-gray-300">
+          <thead class="bg-gray-900/80 text-gray-400 border-b border-gray-800">
+            <tr>
+              <th class="p-3">Time</th>
+              <th class="p-3">Event Type</th>
+              <th class="p-3">Chat ID</th>
+              <th class="p-3">Action Taken</th>
+              <th class="p-3">Details</th>
+            </tr>
+          </thead>
+          <tbody id="audit-table-body" class="divide-y divide-gray-800">
+            <!-- Populated dynamically -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    let globalStats = null;
+    let selectedChatId = null;
+    let allConversations = [];
+
+    // Tab switcher
+    function switchTab(tab) {
+      ['overview', 'approvals', 'conversations', 'scope', 'knowledge', 'audit'].forEach(t => {
+        document.getElementById(`view-${t}`).classList.add('hidden');
+        document.getElementById(`tab-${t}`).classList.remove('border-sky-500', 'text-sky-400');
+        document.getElementById(`tab-${t}`).classList.add('border-transparent', 'text-gray-400');
+      });
+      document.getElementById(`view-${tab}`).classList.remove('hidden');
+      document.getElementById(`tab-${tab}`).classList.add('border-sky-500', 'text-sky-400');
+      document.getElementById(`tab-${tab}`).classList.remove('border-transparent', 'text-gray-400');
+
+      if (tab === 'approvals') loadApprovals();
+      if (tab === 'conversations') loadConversations();
+      if (tab === 'knowledge') loadKnowledge();
+      if (tab === 'audit') loadAuditLogs();
+    }
+
+    // Load initial stats
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/stats');
+        const json = await res.json();
+        if (json.success) {
+          globalStats = json.data;
+          renderHeader(json.data);
+          document.getElementById('stat-unanswered').innerText = json.data.counts.unansweredConversations;
+          document.getElementById('stat-approvals').innerText = json.data.counts.pendingApprovals;
+          document.getElementById('stat-total-chats').innerText = json.data.counts.totalConversations;
+          document.getElementById('stat-blocked').innerText = json.data.counts.blockedContacts + json.data.settings.blockedUserIds.length;
+
+          // Badges
+          const appBadge = document.getElementById('badge-approvals');
+          if (json.data.counts.pendingApprovals > 0) {
+            appBadge.innerText = json.data.counts.pendingApprovals;
+            appBadge.classList.remove('hidden');
+          } else {
+            appBadge.classList.add('hidden');
+          }
+
+          const unansBadge = document.getElementById('badge-unanswered');
+          if (json.data.counts.unansweredConversations > 0) {
+            unansBadge.innerText = json.data.counts.unansweredConversations;
+            unansBadge.classList.remove('hidden');
+          } else {
+            unansBadge.classList.add('hidden');
+          }
+
+          renderScopeLists(json.data.settings);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function renderHeader(data) {
+      // Session status
+      const statusText = document.getElementById('session-status-text');
+      if (data.session.connected) {
+        statusText.innerHTML = `<span class="text-emerald-400 font-medium">● Connected</span> (${data.session.phone || 'Active Session'})`;
+      } else {
+        statusText.innerHTML = `<span class="text-rose-400 font-medium">○ Disconnected</span> (Run \`pnpm worker:auth\`)`;
+      }
+
+      // Mode highlight
+      ['manual', 'draft', 'auto_pilot'].forEach(m => {
+        const btn = document.getElementById(`mode-btn-${m}`);
+        if (m === data.settings.operatingMode) {
+          btn.className = "px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-500/20 text-sky-400 border border-sky-500/30";
+        } else {
+          btn.className = "px-3 py-1.5 rounded-lg text-xs font-medium text-gray-400 hover:text-white";
+        }
+      });
+
+      // Kill Switch
+      const killBtn = document.getElementById('kill-switch-btn');
+      const killText = document.getElementById('kill-switch-text');
+      const killDot = document.getElementById('kill-switch-dot');
+      if (data.settings.emergencyKillSwitch) {
+        killBtn.className = "px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse";
+        killDot.className = "w-2 h-2 rounded-full bg-rose-500";
+        killText.innerText = "Kill Switch: ACTIVE (HALTED)";
+      } else {
+        killBtn.className = "px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20";
+        killDot.className = "w-2 h-2 rounded-full bg-emerald-400";
+        killText.innerText = "Kill Switch: OFF";
+      }
+    }
+
+    async function setOperatingMode(mode) {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operatingMode: mode })
+      });
+      loadStats();
+    }
+
+    async function toggleKillSwitch() {
+      const current = globalStats?.settings?.emergencyKillSwitch || false;
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emergencyKillSwitch: !current })
+      });
+      loadStats();
+    }
+
+    async function disconnectSession() {
+      if (confirm('Are you sure you want to immediately disconnect the Telegram MTProto session?')) {
+        await fetch('/api/auth/disconnect', { method: 'POST' });
+        loadStats();
+      }
+    }
+
+    // Approvals
+    async function loadApprovals() {
+      const res = await fetch('/api/approvals');
+      const json = await res.json();
+      const container = document.getElementById('approvals-container');
+      container.innerHTML = '';
+
+      if (!json.data || json.data.length === 0) {
+        container.innerHTML = `<div class="glass-card rounded-2xl p-8 text-center text-gray-500 text-xs">No pending items in the human approval queue.</div>`;
+        return;
+      }
+
+      json.data.forEach(item => {
+        const confPercent = Math.round((item.aiConfidence || 0) * 100);
+        const card = document.createElement('div');
+        card.className = 'glass-card rounded-2xl p-5 border border-amber-500/20 space-y-3';
+        card.innerHTML = `
+          <div class="flex items-center justify-between text-xs">
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded font-mono bg-gray-800 text-gray-300">Chat ID: ${item.chatId}</span>
+              <span class="text-gray-400">Message ID: #${item.incomingMessageId}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-gray-400">AI Confidence:</span>
+              <span class="px-2 py-0.5 rounded font-bold ${confPercent > 80 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${confPercent}%</span>
+            </div>
+          </div>
+
+          <div class="p-3 rounded-xl bg-gray-900/60 border border-gray-800 text-xs space-y-1">
+            <span class="text-gray-400 font-semibold uppercase text-[10px] tracking-wider">AI Reasoning & Policy Checks:</span>
+            <p class="text-gray-300">${item.aiReasoning || 'Routed for human verification'}</p>
+          </div>
+
+          <div class="space-y-1">
+            <label class="text-xs text-sky-400 font-semibold">Suggested Response (editable):</label>
+            <textarea id="reply-text-${item.id}" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-sky-500 font-sans">${item.suggestedReply}</textarea>
+          </div>
+
+          <div class="flex justify-end gap-2 pt-1">
+            <button onclick="resolveApproval(${item.id}, 'reject')" class="px-3.5 py-1.5 rounded-xl text-xs font-medium text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20">
+              <i class="fa-solid fa-xmark mr-1"></i>Reject
+            </button>
+            <button onclick="resolveApproval(${item.id}, 'edit')" class="px-3.5 py-1.5 rounded-xl text-xs font-medium text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20">
+              <i class="fa-solid fa-pen-to-square mr-1"></i>Save & Send Edited
+            </button>
+            <button onclick="resolveApproval(${item.id}, 'approve')" class="px-4 py-1.5 rounded-xl text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 shadow-lg shadow-sky-500/20">
+              <i class="fa-solid fa-check mr-1"></i>Approve & Dispatch
+            </button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    async function resolveApproval(id, action) {
+      const textarea = document.getElementById(`reply-text-${id}`);
+      const editedReply = textarea ? textarea.value : '';
+      await fetch(`/api/approvals/${id}/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, editedReply })
+      });
+      loadApprovals();
+      loadStats();
+    }
+
+    // Conversations
+    async function loadConversations(filter = 'all') {
+      const res = await fetch(`/api/conversations?filter=${filter}`);
+      const json = await res.json();
+      allConversations = json.data || [];
+      renderConversationsList();
+    }
+
+    function filterConversations(type) {
+      ['all', 'unanswered', 'review'].forEach(t => {
+        const btn = document.getElementById(`filter-${t}`);
+        if (t === type) {
+          btn.className = "flex-1 py-1 rounded-lg text-xs font-medium bg-gray-800 text-white";
+        } else {
+          btn.className = "flex-1 py-1 rounded-lg text-xs font-medium text-gray-400 hover:text-white";
+        }
+      });
+      loadConversations(type);
+    }
+
+    function renderConversationsList() {
+      const list = document.getElementById('conversations-list');
+      list.innerHTML = '';
+      if (allConversations.length === 0) {
+        list.innerHTML = `<div class="p-4 text-center text-gray-500 text-xs">No conversations found</div>`;
+        return;
+      }
+      allConversations.forEach(c => {
+        const div = document.createElement('div');
+        div.className = `p-3.5 cursor-pointer hover:bg-gray-800/60 transition-colors ${selectedChatId === c.chatId ? 'bg-gray-800/90' : ''}`;
+        div.onclick = () => selectChat(c.chatId, c.chatTitle || `User ${c.chatId}`);
+        div.innerHTML = `
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-semibold text-white truncate max-w-[150px]">${c.chatTitle || `Chat ${c.chatId}`}</span>
+            ${c.unanswered ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">Reply Required</span>' : '<span class="text-[10px] text-gray-500">Answered</span>'}
+          </div>
+          <p class="text-xs text-gray-400 truncate">${c.lastMessageText || 'No message preview'}</p>
+        `;
+        list.appendChild(div);
+      });
+    }
+
+    async function selectChat(chatId, title) {
+      selectedChatId = chatId;
+      renderConversationsList();
+      document.getElementById('selected-chat-title').innerText = title;
+      document.getElementById('selected-chat-info').innerText = `Telegram Chat ID: ${chatId}`;
+      document.getElementById('chat-actions').classList.remove('hidden');
+      document.getElementById('manual-reply-input').disabled = false;
+      document.getElementById('manual-reply-btn').disabled = false;
+
+      const res = await fetch(`/api/conversations/${chatId}/messages`);
+      const json = await res.json();
+      const messagesContainer = document.getElementById('chat-messages');
+      messagesContainer.innerHTML = '';
+
+      if (!json.data.messages || json.data.messages.length === 0) {
+        messagesContainer.innerHTML = `<div class="h-full flex items-center justify-center text-gray-500 text-xs">No recorded messages for this chat</div>`;
+        return;
+      }
+
+      json.data.messages.forEach(m => {
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `flex flex-col ${m.isOutgoing ? 'items-end' : 'items-start'}`;
+        msgDiv.innerHTML = `
+          <div class="max-w-[75%] p-3 rounded-2xl text-xs ${m.isOutgoing ? 'bg-sky-600 text-white rounded-br-none' : 'bg-gray-800 text-gray-200 rounded-bl-none'}">
+            ${m.mediaType ? `<div class="mb-1 text-[10px] uppercase font-bold text-sky-200"><i class="fa-solid fa-paperclip mr-1"></i>${m.mediaType}</div>` : ''}
+            <div>${m.text || ''}</div>
+          </div>
+          <span class="text-[10px] text-gray-500 mt-1 px-1">${new Date(m.createdAt).toLocaleTimeString()}</span>
+        `;
+        messagesContainer.appendChild(msgDiv);
+      });
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    // Groups & Blocking Configuration
+    function renderScopeLists(settings) {
+      // Allowed groups list
+      const groupList = document.getElementById('allowed-groups-list');
+      groupList.innerHTML = '';
+      if (settings.allowedGroupIds.length === 0) {
+        groupList.innerHTML = `<div class="p-3 text-gray-500 text-xs">No groups whitelisted (all groups ignored by default)</div>`;
+      } else {
+        settings.allowedGroupIds.forEach(id => {
+          const row = document.createElement('div');
+          row.className = 'p-3 flex items-center justify-between';
+          row.innerHTML = `
+            <span class="font-mono text-gray-300">${id}</span>
+            <button onclick="removeAllowedGroup('${id}')" class="text-rose-400 hover:text-rose-300 text-xs"><i class="fa-solid fa-trash"></i></button>
+          `;
+          groupList.appendChild(row);
+        });
+      }
+
+      // Blocked users list
+      const userList = document.getElementById('blocked-users-list');
+      userList.innerHTML = '';
+      if (settings.blockedUserIds.length === 0) {
+        userList.innerHTML = `<div class="p-3 text-gray-500 text-xs">No blocked users configured</div>`;
+      } else {
+        settings.blockedUserIds.forEach(id => {
+          const row = document.createElement('div');
+          row.className = 'p-3 flex items-center justify-between';
+          row.innerHTML = `
+            <span class="font-mono text-gray-300">${id}</span>
+            <button onclick="removeBlockedUser('${id}')" class="text-rose-400 hover:text-rose-300 text-xs"><i class="fa-solid fa-trash"></i></button>
+          `;
+          userList.appendChild(row);
+        });
+      }
+    }
+
+    async function addAllowedGroup() {
+      const input = document.getElementById('new-group-id-input');
+      const val = input.value.trim();
+      if (!val) return;
+      const current = globalStats?.settings?.allowedGroupIds || [];
+      if (!current.includes(val)) {
+        current.push(val);
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ allowedGroupIds: current })
+        });
+        input.value = '';
+        loadStats();
+      }
+    }
+
+    async function removeAllowedGroup(id) {
+      const current = (globalStats?.settings?.allowedGroupIds || []).filter(g => g !== id);
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowedGroupIds: current })
+      });
+      loadStats();
+    }
+
+    async function addBlockedUser() {
+      const input = document.getElementById('new-blocked-id-input');
+      const val = input.value.trim();
+      if (!val) return;
+      const current = globalStats?.settings?.blockedUserIds || [];
+      if (!current.includes(val)) {
+        current.push(val);
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ blockedUserIds: current })
+        });
+        input.value = '';
+        loadStats();
+      }
+    }
+
+    async function removeBlockedUser(id) {
+      const current = (globalStats?.settings?.blockedUserIds || []).filter(u => u !== id);
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blockedUserIds: current })
+      });
+      loadStats();
+    }
+
+    // Knowledge
+    async function loadKnowledge() {
+      const res = await fetch('/api/knowledge');
+      const json = await res.json();
+      const list = document.getElementById('knowledge-items-list');
+      list.innerHTML = '';
+      if (!json.data || json.data.length === 0) {
+        list.innerHTML = `<div class="p-4 text-center text-gray-500 text-xs">No custom knowledge items recorded</div>`;
+        return;
+      }
+      json.data.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'p-3 rounded-xl bg-gray-900/60 border border-gray-800 text-xs space-y-1';
+        div.innerHTML = `
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-sky-400 capitalize">${item.category}: ${item.questionOrTrigger || 'General'}</span>
+            <span class="text-gray-500 text-[10px]">${new Date(item.createdAt).toLocaleDateString()}</span>
+          </div>
+          <p class="text-gray-300">${item.content}</p>
+        `;
+        list.appendChild(div);
+      });
+    }
+
+    // Audit logs
+    async function loadAuditLogs() {
+      const res = await fetch('/api/audit-logs');
+      const json = await res.json();
+      const tbody = document.getElementById('audit-table-body');
+      tbody.innerHTML = '';
+      if (!json.data || json.data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-gray-500">No logs found</td></tr>`;
+        return;
+      }
+      json.data.forEach(log => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-gray-800/40';
+        tr.innerHTML = `
+          <td class="p-3 text-gray-400 whitespace-nowrap">${new Date(log.createdAt).toLocaleTimeString()}</td>
+          <td class="p-3 font-mono text-sky-400">${log.eventType}</td>
+          <td class="p-3 font-mono text-gray-300">${log.chatId || '-'}</td>
+          <td class="p-3 text-gray-200">${log.actionTaken}</td>
+          <td class="p-3 text-gray-400 truncate max-w-xs">${JSON.stringify(log.details || {})}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Init
+    loadStats();
+    setInterval(loadStats, 10000);
+  </script>
+</body>
+</html>
