@@ -9,7 +9,7 @@
   "containerDefinitions": [
     {
       "name": "web",
-      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/telegram-ai-web:latest",
+      "image": "<ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/telegram-ai-web:latest",
       "essential": true,
       "portMappings": [
         {
@@ -20,16 +20,16 @@
       "environment": [
         { "name": "NODE_ENV", "value": "production" },
         { "name": "PORT", "value": "3000" },
-        { "name": "AWS_REGION", "value": "<REGION>" }
+        { "name": "AWS_REGION", "value": "ap-south-1" }
       ],
       "secrets": [
-        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:telegram-ai/DATABASE_URL" }
+        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/DATABASE_URL" }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/telegram-ai-web",
-          "awslogs-region": "<REGION>",
+          "awslogs-region": "ap-south-1",
           "awslogs-stream-prefix": "ecs"
         }
       }
