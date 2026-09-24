@@ -1,3 +1,4 @@
+import { getBedrockClient } from './client-factory.js';
 import {
   BedrockRuntimeClient,
   ConverseCommand,
@@ -12,13 +13,7 @@ export class BedrockGenerator {
   private modelId: string;
 
   constructor() {
-    this.client = new BedrockRuntimeClient({
-      region: process.env.AWS_REGION || 'us-east-1',
-      credentials: process.env.AWS_ACCESS_KEY_ID ? {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!
-      } : undefined
-    });
+    this.client = getBedrockClient();
     // Amazon Nova Pro handles multimodal vision and reasoning
     this.modelId = process.env.BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
   }
