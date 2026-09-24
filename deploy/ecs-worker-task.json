@@ -9,23 +9,23 @@
   "containerDefinitions": [
     {
       "name": "worker",
-      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/telegram-ai-worker:latest",
+      "image": "<ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/telegram-ai-worker:latest",
       "essential": true,
       "environment": [
         { "name": "NODE_ENV", "value": "production" },
-        { "name": "AWS_REGION", "value": "<REGION>" },
+        { "name": "AWS_REGION", "value": "ap-south-1" },
         { "name": "OPERATING_MODE", "value": "auto_pilot" }
       ],
       "secrets": [
-        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:telegram-ai/DATABASE_URL" },
-        { "name": "TELEGRAM_API_ID", "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:telegram-ai/TELEGRAM_API_ID" },
-        { "name": "TELEGRAM_API_HASH", "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:telegram-ai/TELEGRAM_API_HASH" }
+        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/DATABASE_URL" },
+        { "name": "TELEGRAM_API_ID", "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/TELEGRAM_API_ID" },
+        { "name": "TELEGRAM_API_HASH", "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/TELEGRAM_API_HASH" }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/telegram-ai-worker",
-          "awslogs-region": "<REGION>",
+          "awslogs-region": "ap-south-1",
           "awslogs-stream-prefix": "ecs"
         }
       }
