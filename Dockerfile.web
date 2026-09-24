@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+RUN npm install -g pnpm
+
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* tsconfig*.json ./
+COPY packages/db/package.json packages/db/
+COPY packages/brain/package.json packages/brain/
+COPY packages/web/package.json packages/web/
+
+RUN pnpm install --frozen-lockfile || pnpm install
+
+COPY packages/db packages/db
+COPY packages/brain packages/brain
+COPY packages/web packages/web
+
+RUN pnpm --filter @telegram-ai/db build
+RUN pnpm --filter @telegram-ai/brain build
+RUN pnpm --filter @telegram-ai/web build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+RUN npm install -g pnpm
+
+COPY package.json pnpm-workspace.yaml ./
+COPY packages/db/package.json packages/db/
+COPY packages/brain/package.json packages/brain/
+COPY packages/web/package.json packages/web/
+
+RUN pnpm install --prod --ignore-scripts
+
+COPY --from=builder /app/packages/db/dist packages/db/dist
+COPY --from=builder /app/packages/brain/dist packages/brain/dist
+COPY --from=builder /app/packages/web/dist packages/web/dist
+COPY packages/web/public packages/web/public
+
+EXPOSE 3000
+CMD ["node", "packages/web/dist/server.js"]
