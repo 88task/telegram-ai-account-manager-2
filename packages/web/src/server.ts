@@ -2,8 +2,7 @@ import express, { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { db, conversations, messages, approvalQueue, contacts, knowledgeItems, auditLogs, systemSettings, telegramSessions, eq, desc, and, sql } from '@telegram-ai/db';
-
+import { db, initDb, conversations, messages, approvalQueue, contacts, knowledgeItems, auditLogs, systemSettings, telegramSessions, eq, desc, and, sql } from '@telegram-ai/db';
 
 dotenv.config();
 
@@ -266,6 +265,16 @@ app.post('/api/auth/disconnect', async (req: Request, res: Response) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`Telegram AI Management Panel listening at http://localhost:${port}`);
-});
+// Initialize database schema tables before opening server
+initDb()
+  .then(() => {
+    app.listen(port, () => {
+      console.log(`Telegram AI Management Panel listening at http://localhost:${port}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to initialize database tables:', err);
+    app.listen(port, () => {
+      console.log(`Telegram AI Management Panel listening at http://localhost:${port} (db init failed)`);
+    });
+  });
