@@ -10,7 +10,7 @@ COPY packages/db/package.json packages/db/
 COPY packages/brain/package.json packages/brain/
 COPY packages/worker/package.json packages/worker/
 
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --no-frozen-lockfile --ignore-scripts
 
 COPY packages/db packages/db
 COPY packages/brain packages/brain
