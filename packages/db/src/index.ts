@@ -4,11 +4,20 @@ import * as schema from './schema.js';
 
 const { Pool } = pg;
 
+let connectionString = process.env.DATABASE_URL || '';
+if (connectionString) {
+  try {
+    const url = new URL(connectionString);
+    url.searchParams.delete('sslmode');
+    connectionString = url.toString();
+  } catch {}
+}
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' || process.env.DATABASE_URL?.includes('rds.amazonaws.com')
-    ? { rejectUnauthorized: false }
-    : undefined
+  connectionString,
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
 
 export const db = drizzle(pool, { schema });
