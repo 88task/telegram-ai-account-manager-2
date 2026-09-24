@@ -35,7 +35,7 @@ RUN pnpm install --prod --no-frozen-lockfile --ignore-scripts
 COPY --from=builder /app/packages/db/dist packages/db/dist
 COPY --from=builder /app/packages/brain/dist packages/brain/dist
 COPY --from=builder /app/packages/web/dist packages/web/dist
-COPY packages/web/public packages/web/public
+COPY packages/web/src/public packages/web/dist/public
 
 EXPOSE 3000
 CMD ["node", "packages/web/dist/server.js"]
