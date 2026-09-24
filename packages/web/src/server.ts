@@ -2,8 +2,8 @@ import express, { Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { db, conversations, messages, approvalQueue, contacts, knowledgeItems, auditLogs, systemSettings, telegramSessions } from '@telegram-ai/db';
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { db, conversations, messages, approvalQueue, contacts, knowledgeItems, auditLogs, systemSettings, telegramSessions, eq, desc, and, sql } from '@telegram-ai/db';
+
 
 dotenv.config();
 
