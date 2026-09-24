@@ -6,6 +6,9 @@ import { BedrockGenerator } from './generator/bedrock-client.js';
 import { ModeDispatcher } from './dispatcher/mode-dispatcher.js';
 import { ModerationScorer, ModerationEvaluation } from './safety/moderation-scorer.js';
 import { ScreenshotTriage, ScreenshotTriageResult } from './vision/screenshot-triage.js';
+import { CognitiveOrchestrator, CognitiveExecutionResult } from './llm/cognitive-orchestrator.js';
+import { FeedbackLearner } from './memory/feedback-learner.js';
+import { BrainToolsRegistry } from './tools/brain-tools.js';
 import { detectLanguage } from './evaluations/multilingual-responses.js';
 import { DecisionResult, OperatingMode, TelegramIncomingMessage } from './types.js';
 
@@ -13,6 +16,7 @@ export interface EnrichedDecisionResult extends DecisionResult {
   moderation?: ModerationEvaluation;
   screenshotAnalysis?: ScreenshotTriageResult;
   detectedLanguage?: 'hi' | 'hinglish' | 'en';
+  cognitiveExecution?: CognitiveExecutionResult;
 }
 
 export class BrainPipeline {
@@ -22,7 +26,9 @@ export class BrainPipeline {
   private moderationScorer: ModerationScorer;
   private screenshotTriage: ScreenshotTriage;
   private contextBuilder: ContextBuilder;
-  private generator: BedrockGenerator;
+  private cognitiveOrchestrator: CognitiveOrchestrator;
+  private feedbackLearner: FeedbackLearner;
+  private toolsRegistry: BrainToolsRegistry;
   private dispatcher: ModeDispatcher;
   private myUserId: string;
 
@@ -34,7 +40,9 @@ export class BrainPipeline {
     this.moderationScorer = new ModerationScorer();
     this.screenshotTriage = new ScreenshotTriage();
     this.contextBuilder = new ContextBuilder();
-    this.generator = new BedrockGenerator();
+    this.cognitiveOrchestrator = new CognitiveOrchestrator();
+    this.feedbackLearner = new FeedbackLearner();
+    this.toolsRegistry = new BrainToolsRegistry();
     this.dispatcher = new ModeDispatcher();
   }
 
@@ -56,8 +64,7 @@ export class BrainPipeline {
     // 2. Moderation Scoring (Profanity, repeated scam claims, payment disputes)
     const moderation = this.moderationScorer.evaluate(incoming);
 
-    // If moderation flags severe abuse, repeat scam claims, or removal review:
-    // Route straight to Human Approval Queue instead of auto-responding or removing
+    // Severe abuse or repeated violations route straight to Human Approval Queue
     if (moderation.requiresHumanReview && !moderation.isSafeToAutoReply) {
       return {
         action: 'approval_required',
@@ -67,7 +74,7 @@ export class BrainPipeline {
       };
     }
 
-    // 3. Screenshot Triage (If image attachment is present)
+    // 3. Screenshot Triage (Bedrock Nova Vision for image attachments)
     let screenshotAnalysis: ScreenshotTriageResult | undefined;
     if (incoming.mediaBuffer && (incoming.mediaMimeType?.startsWith('image/') || !incoming.mediaMimeType)) {
       screenshotAnalysis = await this.screenshotTriage.triageImage(
@@ -76,7 +83,7 @@ export class BrainPipeline {
         incoming.text
       );
 
-      // If the screenshot is ambiguous or unreadable, ask the user to clarify
+      // If ambiguous, clarify politely in Hinglish/English
       if (screenshotAnalysis.isAmbiguous && screenshotAnalysis.recommendedClarificationPrompt) {
         return {
           action: mode === 'auto_pilot' ? 'auto_sent' : 'approval_required',
@@ -99,32 +106,58 @@ export class BrainPipeline {
       };
     }
 
-    // 5. Language Detection (Hindi, Hinglish, English)
+    // 5. Language Detection
     const detectedLanguage = detectLanguage(incoming.text || '');
 
     // 6. Safety Guardrails & Human Escalation
     const conversationText = recentHistory.map(m => m.text).join(' ');
     const safety = this.safetyGuardrails.evaluate(incoming, conversationText);
 
-    // 7. Memory & LUMO Knowledge Assembly
+    // 7. Context & Dynamic Few-Shot Memory Assembly
     const memory = await this.contextBuilder.buildContextForContact(incoming.senderId, []);
+    const dynamicExemplars = await this.feedbackLearner.getDynamicExemplars(3);
+    if (dynamicExemplars.length > 0) {
+      memory.approvedExamples.unshift(...dynamicExemplars);
+    }
 
-    // 8. Bedrock Multimodal Converse API (Amazon Nova Pro)
-    const reply = await this.generator.generateReply(incoming, recentHistory, memory);
+    // 8. Cognitive Orchestrator Execution (Perceive -> Synthesize -> Self-Critique)
+    const formattedHistory = recentHistory.map(m => ({
+      role: m.role,
+      text: m.text
+    }));
 
-    // 9. Dispatch to Manual, Draft, or Auto-Pilot
-    const dispatchResult = this.dispatcher.dispatch(mode, reply, safety);
+    const cognitiveExecution = await this.cognitiveOrchestrator.execute(
+      incoming,
+      memory,
+      formattedHistory
+    );
+
+    // 9. Dispatch to Manual, Draft, or Auto-Pilot based on Self-Critique Confidence
+    const dispatchResult = this.dispatcher.dispatch(
+      mode,
+      {
+        text: cognitiveExecution.finalReply,
+        confidence: cognitiveExecution.critique.confidenceScore,
+        reasoning: cognitiveExecution.critique.critiqueNotes
+      },
+      safety
+    );
 
     return {
       ...dispatchResult,
       moderation,
       screenshotAnalysis,
-      detectedLanguage
+      detectedLanguage,
+      cognitiveExecution
     };
   }
 
-  public getModerationScorer(): ModerationScorer {
-    return this.moderationScorer;
+  public getFeedbackLearner(): FeedbackLearner {
+    return this.feedbackLearner;
+  }
+
+  public getToolsRegistry(): BrainToolsRegistry {
+    return this.toolsRegistry;
   }
 }
 
@@ -132,3 +165,6 @@ export * from './types.js';
 export * from './evaluations/multilingual-responses.js';
 export * from './safety/moderation-scorer.js';
 export * from './vision/screenshot-triage.js';
+export * from './llm/cognitive-orchestrator.js';
+export * from './memory/feedback-learner.js';
+export * from './tools/brain-tools.js';
