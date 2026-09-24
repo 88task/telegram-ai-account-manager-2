@@ -1,0 +1,19 @@
+{
+  "name": "telegram-ai-account-manager",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "worker:auth": "pnpm --filter @telegram-ai/worker auth",
+    "worker:start": "pnpm --filter @telegram-ai/worker start",
+    "db:push": "pnpm --filter @telegram-ai/db push",
+    "db:studio": "pnpm --filter @telegram-ai/db studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.5.0"
+  }
+}

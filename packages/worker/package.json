@@ -1,0 +1,21 @@
+{
+  "name": "@telegram-ai/worker",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "auth": "node dist/auth.js",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "telegram": "^2.22.2",
+    "@telegram-ai/brain": "workspace:*",
+    "@telegram-ai/db": "workspace:*",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}
