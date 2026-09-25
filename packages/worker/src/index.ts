@@ -4,7 +4,7 @@ import { NewMessage } from 'telegram/events/index.js';
 import { BrainPipeline, OperatingMode } from '@telegram-ai/brain';
 import { TelegramSender } from './sender.js';
 import crypto from 'crypto';
-import { db, telegramSessions, eq } from '@telegram-ai/db';
+import { db, telegramSessions, systemSettings, messages, conversations, auditLogs, eq, desc } from '@telegram-ai/db';
 import 'dotenv/config';
 
 function decryptSessionString(stored: string): string {
@@ -25,6 +25,22 @@ async function getSessionStringFromDb(): Promise<string> {
   } catch (e: any) {
     console.error('Failed to read session from database:', e.message);
     return '';
+  }
+}
+
+async function getLiveSettings() {
+  try {
+    const [row] = await db.select().from(systemSettings).orderBy(desc(systemSettings.updatedAt)).limit(1);
+    return {
+      operatingMode: (row?.operatingMode as OperatingMode) || (process.env.OPERATING_MODE as OperatingMode) || 'auto_pilot',
+      emergencyKillSwitch: row?.emergencyKillSwitch ?? false,
+    };
+  } catch (e: any) {
+    console.warn('Could not read system_settings from DB, using fallback defaults:', e.message);
+    return {
+      operatingMode: (process.env.OPERATING_MODE as OperatingMode) || 'auto_pilot',
+      emergencyKillSwitch: false,
+    };
   }
 }
 
@@ -77,6 +93,48 @@ async function main() {
 
     console.log(`[New Message] Chat: ${chatId} | Sender: ${senderId} | Text: "${msg.text?.slice(0, 50)}..."`);
 
+    // Record incoming message in DB
+    try {
+      await db.insert(messages).values({
+        telegramMessageId: msg.id,
+        chatId,
+        senderId,
+        text: msg.text || '',
+        isOutgoing: false,
+        mediaType: msg.media ? 'image' : null,
+      });
+
+      // Upsert conversation summary
+      const [existingConv] = await db.select().from(conversations).where(eq(conversations.chatId, chatId)).limit(1);
+      if (existingConv) {
+        await db.update(conversations)
+          .set({
+            lastMessageText: msg.text || '[Media]',
+            lastMessageAt: new Date(),
+            unanswered: true,
+          })
+          .where(eq(conversations.chatId, chatId));
+      } else {
+        await db.insert(conversations).values({
+          chatId,
+          chatTitle: senderId,
+          chatType: isPrivate ? 'private' : isGroup ? 'group' : 'channel',
+          lastMessageText: msg.text || '[Media]',
+          lastMessageAt: new Date(),
+          unanswered: true,
+        });
+      }
+    } catch (dbErr: any) {
+      console.warn('Could not record incoming message in DB:', dbErr.message);
+    }
+
+    // Check live settings from DB (Kill switch & Mode)
+    const settings = await getLiveSettings();
+    if (settings.emergencyKillSwitch) {
+      console.log(`[Kill Switch Active] Skipping AI reply for chat ${chatId}.`);
+      return;
+    }
+
     // Download photo buffer if present for Bedrock Nova Vision analysis
     let mediaBuffer: Buffer | undefined;
     let mediaMimeType: string | undefined;
@@ -93,8 +151,6 @@ async function main() {
       }
     }
 
-    const currentMode = (process.env.OPERATING_MODE as OperatingMode) || 'draft';
-
     const decision = await brain.processMessage(
       {
         messageId: msg.id,
@@ -108,15 +164,36 @@ async function main() {
         mediaMimeType,
         timestamp: msg.date,
       },
-      [], // recent history fetched from DB or MTProto
-      currentMode
+      [], // recent history
+      settings.operatingMode
     );
 
-    console.log(`[Decision] Action: ${decision.action} | Reason: ${decision.reason}`);
+    console.log(`[Decision] Mode: ${settings.operatingMode} | Action: ${decision.action} | Reason: ${decision.reason}`);
+
+    // Log decision to auditLogs
+    try {
+      await db.insert(auditLogs).values({
+        eventType: decision.action,
+        chatId,
+        actionTaken: decision.reason || 'AI evaluation completed',
+        details: { confidence: decision.confidence, replyPreview: decision.replyText?.slice(0, 100) },
+      });
+    } catch (e: any) {
+      // ignore audit log failure
+    }
 
     if (decision.action === 'auto_sent' && decision.replyText) {
       console.log(`[Auto-Pilot] Sending reply to ${chatId}: "${decision.replyText}"`);
       await sender.sendReply(chatId, decision.replyText);
+
+      // Record outgoing message and mark conversation answered
+      try {
+        await db.update(conversations)
+          .set({ unanswered: false })
+          .where(eq(conversations.chatId, chatId));
+      } catch (e) {
+        // ignore
+      }
     }
   }, new NewMessage({}));
 
