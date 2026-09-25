@@ -4,7 +4,7 @@ import { NewMessage } from 'telegram/events/index.js';
 import { BrainPipeline, OperatingMode } from '@telegram-ai/brain';
 import { TelegramSender } from './sender.js';
 import crypto from 'crypto';
-import { db, telegramSessions, systemSettings, messages, conversations, auditLogs, eq, desc } from '@telegram-ai/db';
+import { db, telegramSessions, systemSettings, messages, conversations, auditLogs, eq } from '@telegram-ai/db';
 import 'dotenv/config';
 
 function decryptSessionString(stored: string): string {
@@ -30,10 +30,16 @@ async function getSessionStringFromDb(): Promise<string> {
 
 async function getLiveSettings() {
   try {
-    const [row] = await db.select().from(systemSettings).orderBy(desc(systemSettings.updatedAt)).limit(1);
+    const rows = await db.select().from(systemSettings);
+    const map = new Map<string, string>();
+    for (const r of rows) {
+      map.set(r.key, r.value);
+    }
+    const mode = (map.get('operating_mode') as OperatingMode) || (process.env.OPERATING_MODE as OperatingMode) || 'auto_pilot';
+    const killSwitch = map.get('emergency_kill_switch') === 'true';
     return {
-      operatingMode: (row?.operatingMode as OperatingMode) || (process.env.OPERATING_MODE as OperatingMode) || 'auto_pilot',
-      emergencyKillSwitch: row?.emergencyKillSwitch ?? false,
+      operatingMode: mode,
+      emergencyKillSwitch: killSwitch,
     };
   } catch (e: any) {
     console.warn('Could not read system_settings from DB, using fallback defaults:', e.message);
