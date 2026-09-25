@@ -30,9 +30,9 @@ jobs:
 
       - name: Ensure ECR Repositories Exist
         run: |
-          aws ecr describe-repositories --repository-names telegram-ai-worker --region ${{ secrets.AWS_REGION || 'ap-south-1' }} ||           aws ecr create-repository --repository-name telegram-ai-worker --region ${{ secrets.AWS_REGION || 'ap-south-1' }}
+          aws ecr describe-repositories --repository-names telegram-ai-worker --region ${{ secrets.AWS_REGION || 'ap-south-1' }} ||             aws ecr create-repository --repository-name telegram-ai-worker --region ${{ secrets.AWS_REGION || 'ap-south-1' }}
 
-          aws ecr describe-repositories --repository-names telegram-ai-web --region ${{ secrets.AWS_REGION || 'ap-south-1' }} ||           aws ecr create-repository --repository-name telegram-ai-web --region ${{ secrets.AWS_REGION || 'ap-south-1' }}
+          aws ecr describe-repositories --repository-names telegram-ai-web --region ${{ secrets.AWS_REGION || 'ap-south-1' }} ||             aws ecr create-repository --repository-name telegram-ai-web --region ${{ secrets.AWS_REGION || 'ap-south-1' }}
 
       - name: Build, tag, and push Worker container to ECR
         env:
@@ -52,18 +52,24 @@ jobs:
           docker push $REGISTRY/telegram-ai-web:$IMAGE_TAG
           docker push $REGISTRY/telegram-ai-web:latest
 
-      - name: Trigger ECS Service Redeployments (if services exist)
+      - name: Auto Force-Update All ECS Services
         env:
           CLUSTER: ${{ secrets.ECS_CLUSTER || 'telegram-ai-cluster' }}
           REGION: ${{ secrets.AWS_REGION || 'ap-south-1' }}
         run: |
-          echo "Checking ECS cluster $CLUSTER..."
-          if aws ecs describe-clusters --clusters "$CLUSTER" --region "$REGION" | grep -q 'ACTIVE'; then
-            echo "Triggering rolling update for worker service..."
-            aws ecs update-service --cluster "$CLUSTER" --service telegram-worker-service --force-new-deployment --region "$REGION" || echo "Worker service not created yet, image is ready in ECR."
-            
-            echo "Triggering rolling update for web service..."
-            aws ecs update-service --cluster "$CLUSTER" --service telegram-web-service --force-new-deployment --region "$REGION" || echo "Web service not created yet, image is ready in ECR."
+          echo "Discovering all ECS services in cluster $CLUSTER ($REGION)..."
+          SERVICES=$(aws ecs list-services --cluster "$CLUSTER" --region "$REGION" --query "serviceArns[]" --output text 2>/dev/null || true)
+          
+          if [ -n "$SERVICES" ]; then
+            for svc in $SERVICES; do
+              svc_name=$(echo "$svc" | awk -F'/' '{print $NF}')
+              echo "Triggering force-new-deployment for service: $svc_name"
+              aws ecs update-service --cluster "$CLUSTER" --service "$svc_name" --force-new-deployment --region "$REGION" || echo "Could not update $svc_name"
+            done
           else
-            echo "ECS Cluster $CLUSTER not active yet. Images successfully pushed to ECR."
+            echo "No services returned by list-services, trying known service names..."
+            for known_svc in stable-server-web vivid-service-woker telegram-web-service telegram-worker-service; do
+              echo "Attempting update on $known_svc..."
+              aws ecs update-service --cluster "$CLUSTER" --service "$known_svc" --force-new-deployment --region "$REGION" || echo "$known_svc not found, skipping."
+            done
           fi
