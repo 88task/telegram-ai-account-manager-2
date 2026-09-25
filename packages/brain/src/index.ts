@@ -152,6 +152,11 @@ export class BrainPipeline {
     };
   }
 
+  public updateScope(allowedGroups: string[], blockedUsers: string[]): void {
+    this.scopeFilter.updateAllowedGroups(allowedGroups);
+    this.scopeFilter.updateBlockedUsers(blockedUsers);
+  }
+
   public getFeedbackLearner(): FeedbackLearner {
     return this.feedbackLearner;
   }
