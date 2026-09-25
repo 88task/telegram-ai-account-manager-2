@@ -112,15 +112,74 @@ export async function initDb(): Promise<void> {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
 
-      -- Ensure id column exists on any tables that pre-existed
+      -- Comprehensive column backfill for pre-existing tables
       ALTER TABLE conversations ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_id TEXT;
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_title TEXT;
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_type TEXT DEFAULT 'private';
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_text TEXT;
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMP DEFAULT NOW();
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS unanswered BOOLEAN DEFAULT false;
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS requires_human_review BOOLEAN DEFAULT false;
+
       ALTER TABLE contacts ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE contacts ADD COLUMN IF NOT EXISTS telegram_user_id TEXT;
+      ALTER TABLE contacts ADD COLUMN IF NOT EXISTS username TEXT;
+      ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_name TEXT;
+      ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_name TEXT;
+      ALTER TABLE contacts ADD COLUMN IF NOT EXISTS phone TEXT;
+      ALTER TABLE contacts ADD COLUMN IF NOT EXISTS notes TEXT;
+      ALTER TABLE contacts ADD COLUMN IF NOT EXISTS custom_instructions TEXT;
+      ALTER TABLE contacts ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT false;
+      ALTER TABLE contacts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS telegram_message_id INTEGER;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS chat_id TEXT;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_id TEXT;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS text TEXT;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_outgoing BOOLEAN DEFAULT false;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type TEXT;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url TEXT;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+
       ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS chat_id TEXT;
+      ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS incoming_message_id INTEGER;
+      ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS suggested_reply TEXT;
+      ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS edited_reply TEXT;
+      ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS ai_confidence DOUBLE PRECISION;
+      ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS ai_reasoning TEXT;
+      ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
+      ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP;
+      ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+
       ALTER TABLE knowledge_items ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE knowledge_items ADD COLUMN IF NOT EXISTS category TEXT;
+      ALTER TABLE knowledge_items ADD COLUMN IF NOT EXISTS question_or_trigger TEXT;
+      ALTER TABLE knowledge_items ADD COLUMN IF NOT EXISTS content TEXT;
+      ALTER TABLE knowledge_items ADD COLUMN IF NOT EXISTS tags TEXT[];
+      ALTER TABLE knowledge_items ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+
       ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS event_type TEXT;
+      ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS chat_id TEXT;
+      ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS action_taken TEXT;
+      ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS details JSONB;
+      ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+
       ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS key TEXT;
+      ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS value TEXT;
+      ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+
       ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS user_id TEXT;
+      ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS phone TEXT;
+      ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS encrypted_session_string TEXT;
+      ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+      ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+      ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
     `);
     console.log('[DB] Database tables and schema columns initialized successfully.');
   } finally {
