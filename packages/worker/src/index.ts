@@ -31,7 +31,6 @@ async function getSessionStringFromDb(): Promise<string> {
 async function main() {
   const apiId = parseInt(process.env.TELEGRAM_API_ID || '', 10);
   const apiHash = process.env.TELEGRAM_API_HASH || '';
-  const sessionString = process.env.TELEGRAM_SESSION_STRING || '';
 
   if (!apiId || !apiHash) {
     console.error('Missing TELEGRAM_API_ID or TELEGRAM_API_HASH.');
