@@ -426,7 +426,7 @@
       if (data.session.connected) {
         statusText.innerHTML = `<span class="text-emerald-400 font-medium">● Connected</span> (${data.session.phone || 'Active Session'})`;
       } else {
-        statusText.innerHTML = `<span class="text-rose-400 font-medium">○ Disconnected</span> (Run \`pnpm worker:auth\`)`;
+        statusText.innerHTML = `<span class="text-rose-400 font-medium">○ Disconnected</span> <button onclick="openAuthModal()" class="ml-2 px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/30 hover:bg-sky-500/30 transition-all">Connect Telegram</button>`;
       }
 
       // Mode highlight
@@ -765,5 +765,96 @@
     loadStats();
     setInterval(loadStats, 10000);
   </script>
+
+  <!-- Telegram Login Modal -->
+  <div id="auth-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 backdrop-blur-sm">
+    <div class="w-full max-w-md mx-4 bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-white">Connect Telegram Account</h3>
+        <button onclick="closeAuthModal()" class="text-gray-500 hover:text-white">&times;</button>
+      </div>
+      <div id="auth-step-phone" class="space-y-3">
+        <p class="text-sm text-gray-400">Enter your phone number with country code. A login code will be sent to your Telegram app.</p>
+        <input id="auth-phone" type="tel" placeholder="+919876543210" class="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white focus:outline-none focus:border-sky-500">
+        <button onclick="sendAuthCode()" class="w-full px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-medium">Send Login Code</button>
+      </div>
+      <div id="auth-step-code" class="space-y-3 hidden">
+        <p class="text-sm text-gray-400">Enter the 5-digit login code sent to your Telegram app.</p>
+        <input id="auth-code" type="text" inputmode="numeric" placeholder="12345" class="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white tracking-widest focus:outline-none focus:border-sky-500">
+        <button onclick="verifyAuthCode()" class="w-full px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium">Verify Code</button>
+      </div>
+      <div id="auth-step-password" class="space-y-3 hidden">
+        <p class="text-sm text-gray-400">Two-factor authentication is enabled. Enter your Telegram cloud password.</p>
+        <input id="auth-password" type="password" placeholder="Cloud password" class="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white focus:outline-none focus:border-sky-500">
+        <button onclick="submitAuthPassword()" class="w-full px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium">Sign In</button>
+      </div>
+      <p id="auth-status" class="text-sm text-gray-500 min-h-[1.25rem]"></p>
+    </div>
+  </div>
+  <script>
+    let authPhone = '';
+    function openAuthModal() {
+      document.getElementById('auth-modal').classList.remove('hidden');
+      document.getElementById('auth-modal').classList.add('flex');
+      document.getElementById('auth-step-phone').classList.remove('hidden');
+      document.getElementById('auth-step-code').classList.add('hidden');
+      document.getElementById('auth-step-password').classList.add('hidden');
+      document.getElementById('auth-status').textContent = '';
+    }
+    function closeAuthModal() {
+      document.getElementById('auth-modal').classList.add('hidden');
+      document.getElementById('auth-modal').classList.remove('flex');
+    }
+    function authStatus(msg, isError) {
+      const el = document.getElementById('auth-status');
+      el.textContent = msg;
+      el.className = 'text-sm min-h-[1.25rem] ' + (isError ? 'text-rose-400' : 'text-emerald-400');
+    }
+    async function sendAuthCode() {
+      authPhone = document.getElementById('auth-phone').value.trim();
+      if (!authPhone) { authStatus('Enter your phone number first.', true); return; }
+      authStatus('Sending login code...', false);
+      try {
+        const r = await fetch('/api/auth/send-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: authPhone }) });
+        const j = await r.json();
+        if (j.success) {
+          authStatus('Code sent. Check your Telegram app.', false);
+          document.getElementById('auth-step-phone').classList.add('hidden');
+          document.getElementById('auth-step-code').classList.remove('hidden');
+        } else { authStatus(j.error || 'Failed to send code.', true); }
+      } catch (e) { authStatus('Network error: ' + e.message, true); }
+    }
+    async function verifyAuthCode() {
+      const code = document.getElementById('auth-code').value.trim();
+      if (!code) { authStatus('Enter the login code.', true); return; }
+      authStatus('Verifying code...', false);
+      try {
+        const r = await fetch('/api/auth/verify-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: authPhone, code }) });
+        const j = await r.json();
+        if (j.success && j.requiresPassword) {
+          document.getElementById('auth-step-code').classList.add('hidden');
+          document.getElementById('auth-step-password').classList.remove('hidden');
+          authStatus('2FA enabled. Enter your cloud password.', false);
+        } else if (j.success) {
+          authStatus('Telegram connected! The worker will pick up the session within ~15 seconds.', false);
+          setTimeout(() => { closeAuthModal(); location.reload(); }, 2000);
+        } else { authStatus(j.error || 'Verification failed.', true); }
+      } catch (e) { authStatus('Network error: ' + e.message, true); }
+    }
+    async function submitAuthPassword() {
+      const password = document.getElementById('auth-password').value;
+      if (!password) { authStatus('Enter your cloud password.', true); return; }
+      authStatus('Signing in...', false);
+      try {
+        const r = await fetch('/api/auth/submit-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: authPhone, password }) });
+        const j = await r.json();
+        if (j.success) {
+          authStatus('Telegram connected! The worker will pick up the session within ~15 seconds.', false);
+          setTimeout(() => { closeAuthModal(); location.reload(); }, 2000);
+        } else { authStatus(j.error || 'Password check failed.', true); }
+      } catch (e) { authStatus('Network error: ' + e.message, true); }
+    }
+  </script>
+
 </body>
 </html>

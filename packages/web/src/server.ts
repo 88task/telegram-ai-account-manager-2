@@ -1,5 +1,10 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
+import crypto from 'crypto';
+import { TelegramClient } from 'telegram';
+import { StringSession } from 'telegram/sessions/index.js';
+import { computeCheck } from 'telegram/Password.js';
+import { Api } from 'telegram';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { db, initDb, conversations, messages, approvalQueue, contacts, knowledgeItems, auditLogs, systemSettings, telegramSessions, eq, desc, and, sql } from '@telegram-ai/db';
@@ -249,7 +254,107 @@ app.get('/api/audit-logs', async (req: Request, res: Response) => {
   }
 });
 
+
+// ---------- In-panel Telegram MTProto login ----------
+const pendingLogins = new Map<string, { client: TelegramClient; phone: string; phoneCodeHash: string }>();
+
+function getEncryptionKey(): Buffer | null {
+  const keyHex = (process.env.SESSION_ENCRYPTION_KEY || '').trim();
+  if (!keyHex) return null;
+  return Buffer.from(keyHex, 'hex');
+}
+
+function encryptSessionString(plain: string): string {
+  const key = getEncryptionKey();
+  if (!key) return plain; // stored unencrypted when SESSION_ENCRYPTION_KEY is not set
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  return ['enc', iv.toString('hex'), cipher.getAuthTag().toString('hex'), enc.toString('hex')].join(':');
+}
+
+async function saveActiveSession(phone: string, sessionString: string) {
+  const encrypted = encryptSessionString(sessionString);
+  await db.update(telegramSessions).set({ isActive: false, updatedAt: new Date() }).where(eq(telegramSessions.isActive, true));
+  await db.insert(telegramSessions).values({
+    userId: phone, phone, encryptedSessionString: encrypted, isActive: true,
+  }).onConflictDoUpdate({
+    target: telegramSessions.userId,
+    set: { phone, encryptedSessionString: encrypted, isActive: true, updatedAt: new Date() },
+  });
+}
+
+// Send login code to a Telegram phone number
+app.post('/api/auth/send-code', async (req: Request, res: Response) => {
+  const phone = (req.body?.phone || '').trim();
+  try {
+    if (!phone) return res.status(400).json({ success: false, error: 'phone is required' });
+    const apiId = parseInt(process.env.TELEGRAM_API_ID || '', 10);
+    const apiHash = process.env.TELEGRAM_API_HASH || '';
+    if (!apiId || !apiHash) {
+      return res.status(500).json({ success: false, error: 'TELEGRAM_API_ID / TELEGRAM_API_HASH are not configured on the web task' });
+    }
+    // Drop any previous pending login for this phone
+    const previous = pendingLogins.get(phone);
+    if (previous) { try { await previous.client.disconnect(); } catch {} pendingLogins.delete(phone); }
+
+    const client = new TelegramClient(new StringSession(''), apiId, apiHash, { connectionRetries: 5 });
+    await client.connect();
+    const result = await client.sendCode({ apiId, apiHash }, phone);
+    pendingLogins.set(phone, { client, phone, phoneCodeHash: (result as any).phoneCodeHash });
+    res.json({ success: true, message: 'Login code sent to your Telegram app' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.errorMessage || error.message });
+  }
+});
+
+// Verify the login code; responds requiresPassword:true when 2FA is enabled
+app.post('/api/auth/verify-code', async (req: Request, res: Response) => {
+  const phone = (req.body?.phone || '').trim();
+  const code = (req.body?.code || '').trim();
+  const pending = pendingLogins.get(phone);
+  try {
+    if (!pending) return res.status(400).json({ success: false, error: 'No login in progress for this phone. Request a new code.' });
+    await pending.client.invoke(new Api.auth.SignIn({
+      phoneNumber: phone,
+      phoneCodeHash: pending.phoneCodeHash,
+      phoneCode: code,
+    }));
+    const sessionString = (pending.client.session as StringSession).save() as unknown as string;
+    await saveActiveSession(phone, sessionString);
+    try { await pending.client.disconnect(); } catch {}
+    pendingLogins.delete(phone);
+    res.json({ success: true, requiresPassword: false, message: 'Telegram connected' });
+  } catch (error: any) {
+    if (error.errorMessage === 'SESSION_PASSWORD_NEEDED') {
+      return res.json({ success: true, requiresPassword: true });
+    }
+    res.status(400).json({ success: false, error: error.errorMessage || error.message });
+  }
+});
+
+// Submit the 2FA cloud password (only needed when verify-code asked for it)
+app.post('/api/auth/submit-password', async (req: Request, res: Response) => {
+  const phone = (req.body?.phone || '').trim();
+  const password = req.body?.password || '';
+  const pending = pendingLogins.get(phone);
+  try {
+    if (!pending) return res.status(400).json({ success: false, error: 'No login in progress for this phone. Request a new code.' });
+    const pwdInfo = await pending.client.invoke(new Api.account.GetPassword());
+    const srp = await computeCheck(pwdInfo, password);
+    await pending.client.invoke(new Api.auth.CheckPassword({ password: srp }));
+    const sessionString = (pending.client.session as StringSession).save() as unknown as string;
+    await saveActiveSession(phone, sessionString);
+    try { await pending.client.disconnect(); } catch {}
+    pendingLogins.delete(phone);
+    res.json({ success: true, message: 'Telegram connected with 2FA' });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.errorMessage || error.message });
+  }
+});
+
 // 9. Session Disconnect / Logout
+
 app.post('/api/auth/disconnect', async (req: Request, res: Response) => {
   try {
     await db.update(telegramSessions).set({ isActive: false, updatedAt: new Date() }).where(eq(telegramSessions.isActive, true));
