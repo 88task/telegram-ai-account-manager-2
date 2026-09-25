@@ -4,9 +4,13 @@ export class ScopeFilter {
   private allowedGroupIds: Set<string>;
   private blockedUserIds: Set<string>;
 
-  constructor(allowedGroupsConfig?: string, blockedUsersConfig?: string) {
-    const rawGroups = allowedGroupsConfig || process.env.ALLOWED_GROUP_IDS || '';
-    const rawBlocked = blockedUsersConfig || process.env.BLOCKED_USER_IDS || '';
+  constructor(allowedGroupsConfig?: string | string[], blockedUsersConfig?: string | string[]) {
+    const rawGroups = Array.isArray(allowedGroupsConfig)
+      ? allowedGroupsConfig.join(',')
+      : (allowedGroupsConfig || process.env.ALLOWED_GROUP_IDS || '');
+    const rawBlocked = Array.isArray(blockedUsersConfig)
+      ? blockedUsersConfig.join(',')
+      : (blockedUsersConfig || process.env.BLOCKED_USER_IDS || '');
 
     this.allowedGroupIds = new Set(
       rawGroups.split(',').map(s => s.trim()).filter(Boolean)
@@ -34,8 +38,21 @@ export class ScopeFilter {
       };
     }
 
-    // 2. Channels & Broadcasts (Never process)
-    if (msg.isChannel) {
+    // 2. Explicitly Allowed Groups / Supergroups in whitelist
+    if (this.allowedGroupIds.has(msg.chatId)) {
+      return {
+        allowed: true,
+        chatType: msg.isPrivateChat ? 'private' : 'group'
+      };
+    }
+
+    // 3. One-to-one Private Chats (Allowed by default unless blocked)
+    if (msg.isPrivateChat) {
+      return { allowed: true, chatType: 'private' };
+    }
+
+    // 4. Pure Broadcast channels (Never process unless explicitly whitelisted)
+    if (msg.isChannel && !msg.isGroup) {
       return {
         allowed: false,
         reason: 'Broadcast channels are ignored by default.',
@@ -43,19 +60,15 @@ export class ScopeFilter {
       };
     }
 
-    // 3. Groups (Ignored unless explicitly whitelisted)
-    if (msg.isGroup) {
-      if (!this.allowedGroupIds.has(msg.chatId)) {
-        return {
-          allowed: false,
-          reason: 'Group chat is not in ALLOWED_GROUP_IDS whitelist.',
-          chatType: 'group'
-        };
-      }
-      return { allowed: true, chatType: 'group' };
+    // 5. Unapproved Groups & Supergroups
+    if (msg.isGroup || msg.isChannel) {
+      return {
+        allowed: false,
+        reason: 'Group chat is not in ALLOWED_GROUP_IDS whitelist.',
+        chatType: 'group'
+      };
     }
 
-    // 4. Allowed Private 1-to-1 chats
     return { allowed: true, chatType: 'private' };
   }
 }
