@@ -111,8 +111,18 @@ export async function initDb(): Promise<void> {
         value TEXT NOT NULL,
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
+
+      -- Ensure id column exists on any tables that pre-existed
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE contacts ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE knowledge_items ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS id SERIAL;
+      ALTER TABLE telegram_sessions ADD COLUMN IF NOT EXISTS id SERIAL;
     `);
-    console.log('[DB] Database tables initialized successfully.');
+    console.log('[DB] Database tables and schema columns initialized successfully.');
   } finally {
     client.release();
   }
