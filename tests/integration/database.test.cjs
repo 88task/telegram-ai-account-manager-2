@@ -9,7 +9,7 @@ test('schema creation, upgrade, deduplication, concurrent startup and rollback',
   t.after(() => db.close());
   await t.test('fresh initialization matches every ORM table', async () => {
     await db.initDb();
-    for (const table of [db.conversations, db.messages, db.contacts, db.telegramSessions, db.approvalQueue, db.knowledgeItems, db.auditLogs, db.systemSettings, db.messageDuplicateArchive, db.moderationStates]) {
+    for (const table of [db.conversations, db.messages, db.contacts, db.telegramSessions, db.approvalQueue, db.knowledgeItems, db.auditLogs, db.systemSettings, db.messageDuplicateArchive, db.conversationDuplicateArchive, db.moderationStates]) {
       assert.deepEqual(await db.db.select().from(table), []);
     }
     const rows = await db.db.insert(db.conversations).values({ chatId: '42' }).returning();
