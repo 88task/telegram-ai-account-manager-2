@@ -1,4 +1,4 @@
-import fetch from 'node-fetch';
+// Uses Node 20+ global fetch
 
 export interface GeminiContentOptions {
   prompt: string;
