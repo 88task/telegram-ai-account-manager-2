@@ -44,17 +44,25 @@ export class ScopeFilter {
   }
 
   public check(msg: TelegramIncomingMessage): ScopeCheckResult {
+    const normalizedChatId = String(msg.chatId || '').trim();
+    const normalizedAllowedGroups = new Set(
+      Array.from(this.allowedGroupIds).map((value) => String(value || '').trim())
+    );
+    const isPrivateChat = normalizedChatId !== '' && Number(normalizedChatId) > 0;
+    const isGroupChat = normalizedChatId !== '' && Number(normalizedChatId) < 0 && !msg.isChannel;
+    const isChannelChat = !!msg.isChannel && !isPrivateChat && !isGroupChat;
+
     // 1. Blocked User Filter (Strict drop)
     if (this.blockedUserIds.has(msg.senderId)) {
       return {
         allowed: false,
         reason: 'User is explicitly on the BLOCKED_USER_IDS list.',
-        chatType: msg.isPrivateChat ? 'private' : 'group'
+        chatType: isPrivateChat ? 'private' : 'group'
       };
     }
 
     // 2. Ignore admins in group chats (anonymous admin posts + explicitly configured admin IDs)
-    if (!msg.isPrivateChat && msg.isSenderAdmin) {
+    if (!isPrivateChat && msg.isSenderAdmin) {
       return {
         allowed: false,
         reason: 'Sender is a group administrator.',
@@ -63,20 +71,20 @@ export class ScopeFilter {
     }
 
     // 3. Explicitly Allowed Groups / Supergroups in whitelist
-    if (this.allowedGroupIds.has(msg.chatId)) {
+    if (normalizedAllowedGroups.has(normalizedChatId)) {
       return {
         allowed: true,
-        chatType: msg.isPrivateChat ? 'private' : 'group'
+        chatType: isPrivateChat ? 'private' : 'group'
       };
     }
 
     // 4. One-to-one Private Chats (Allowed by default unless blocked)
-    if (msg.isPrivateChat) {
+    if (isPrivateChat) {
       return { allowed: true, chatType: 'private' };
     }
 
     // 5. Pure Broadcast channels (Never process unless explicitly whitelisted)
-    if (msg.isChannel && !msg.isGroup) {
+    if (isChannelChat) {
       return {
         allowed: false,
         reason: 'Broadcast channels are ignored by default.',
@@ -85,7 +93,7 @@ export class ScopeFilter {
     }
 
     // 6. Unapproved Groups & Supergroups
-    if (msg.isGroup || msg.isChannel) {
+    if (isGroupChat || msg.isGroup || msg.isChannel) {
       return {
         allowed: false,
         reason: 'Group chat is not in ALLOWED_GROUP_IDS whitelist.',

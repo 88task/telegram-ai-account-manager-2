@@ -196,9 +196,10 @@ export async function startWorker(forcedSession?: string) {
 
         const chatId = normalizeId(msg.chatId);
         const senderId = normalizeId(msg.senderId);
-        const isPrivate = msg.isPrivate;
-        const isGroup = msg.isGroup;
-        const isChannel = msg.isChannel;
+        const isPrivateChat = chatId !== '' && Number(chatId) > 0;
+        const isGroupChat = chatId !== '' && Number(chatId) < 0 && !msg.isChannel;
+        const isChannelChat = !!msg.isChannel || (chatId.startsWith('-100') && !isGroupChat && !isPrivateChat);
+        const isAnonymousAdminPost = chatId.startsWith('-100') && senderId && senderId === chatId;
 
         console.log(`[New Message] Chat: ${chatId} | Sender: ${senderId} | Text: "${msg.text?.slice(0, 50)}..."`);
 
@@ -226,7 +227,7 @@ export async function startWorker(forcedSession?: string) {
               chatId,
               accountKey: 'default',
               chatTitle: senderId,
-              chatType: isPrivate ? 'private' : isGroup ? 'group' : 'channel',
+              chatType: isPrivateChat ? 'private' : isGroupChat ? 'group' : 'channel',
               lastMessageText: msg.text || '[Media]',
               lastMessageAt: new Date(),
               unanswered: true,
@@ -261,14 +262,12 @@ export async function startWorker(forcedSession?: string) {
         }
 
         let isSenderAdmin = false;
-        if (!isPrivate) {
-          if (senderId && senderId === chatId) {
-            isSenderAdmin = true;
-            console.log(`[worker] Ignored message from anonymous admin (senderId === chatId ${chatId})`);
-          } else if (settings.ignoredAdminIds.includes(senderId)) {
-            isSenderAdmin = true;
-            console.log(`[worker] Ignored message from configured admin ID (${senderId}) in chat (${chatId})`);
-          }
+        if (!isPrivateChat && isAnonymousAdminPost) {
+          isSenderAdmin = true;
+          console.log(`[worker] Ignored message from anonymous admin (senderId === chatId ${chatId})`);
+        } else if (!isPrivateChat && settings.ignoredAdminIds.includes(senderId)) {
+          isSenderAdmin = true;
+          console.log(`[worker] Ignored message from configured admin ID (${senderId}) in chat (${chatId})`);
         }
 
         let decision: any;
@@ -278,9 +277,9 @@ export async function startWorker(forcedSession?: string) {
               messageId: msg.id,
               chatId,
               senderId,
-              isPrivateChat: !!isPrivate,
-              isGroup: !!isGroup,
-              isChannel: !!isChannel,
+              isPrivateChat: isPrivateChat,
+              isGroup: isGroupChat || !!msg.isGroup,
+              isChannel: isChannelChat || !!msg.isChannel,
               isSenderAdmin,
               text: msg.text,
               mediaBuffer,
