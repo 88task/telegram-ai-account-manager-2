@@ -213,8 +213,8 @@ ${memory.approvedExamples.map(e => `Q: "${e.userMessage}"\nA: "${e.approvedReply
     // Earning / How to earn in LUMO
     if (lower.includes('earn') || lower.includes('kamai') || lower.includes('kama') || lower.includes('paise')) {
       return dialect === 'en'
-        ? 'In LUMO, you earn by completing WhatsApp tasks (₹4 per successfully sent message). You can also earn referral rewards: ₹20 + 16% lifetime commission when your friend joins with your link, adds a valid bank account, and completes 20 WhatsApp message tasks.'
-        : 'LUMO me kamayi WhatsApp tasks se hoti hai (har successful message send karne par ₹4 milta hai). Iske alawa Referral Reward: ₹20 + 16% lifetime commission milta hai jab aapka dost aapke link se judta hai, valid bank add karta hai aur 20 WhatsApp tasks complete karta hai.';
+        ? 'In LUMO, you earn by completing WhatsApp tasks (₹2.50 per successfully sent message). You can also earn referral rewards: ₹20 + 16% lifetime commission when your friend joins with your link, adds a valid bank account, and completes 20 WhatsApp message tasks.'
+        : 'LUMO me kamayi WhatsApp tasks se hoti hai (har successful message send karne par ₹2.50 milta hai). Iske alawa Referral Reward: ₹20 + 16% lifetime commission milta hai jab aapka dost aapke link se judta hai, valid bank add karta hai aur 20 WhatsApp tasks complete karta hai.';
     }
 
     // Task timing

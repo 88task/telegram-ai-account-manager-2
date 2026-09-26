@@ -1,4 +1,5 @@
 import { getBedrockClient } from '../generator/client-factory.js';
+import { GeminiClientPool } from '../generator/gemini-client.js';
 import {
   BedrockRuntimeClient,
   ConverseCommand,
@@ -26,10 +27,17 @@ export interface ScreenshotTriageResult {
 export class ScreenshotTriage {
   private client: BedrockRuntimeClient;
   private modelId: string;
+  private geminiPool: GeminiClientPool = new GeminiClientPool();
+  private providerMode: 'auto' | 'gemini' | 'bedrock' = 'auto';
 
   constructor() {
     this.client = getBedrockClient();
     this.modelId = process.env.BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
+  }
+
+  public setGeminiConfig(keys: string[], model?: string, mode?: 'auto' | 'gemini' | 'bedrock'): void {
+    this.geminiPool.updateConfig(keys, model);
+    if (mode) this.providerMode = mode;
   }
 
   /**
@@ -67,6 +75,15 @@ OUTPUT FORMAT: Strict JSON only:
   "suggestedAction": "what the support reply should tell the user",
   "recommendedClarificationPrompt": "Hinglish/English polite follow-up question if isAmbiguous is true, asking them to describe the issue"
 }`;
+
+    // If providerMode is 'gemini' and keys are configured, use Gemini directly
+    if (this.providerMode === 'gemini' && this.geminiPool.hasKeys()) {
+      try {
+        return await this.triageWithGemini(prompt, imageBuffer, mimeType);
+      } catch (gemErr: any) {
+        console.warn('Gemini primary vision triage failed, attempting Bedrock fallback:', gemErr.message);
+      }
+    }
 
     try {
       const command = new ConverseCommand({
@@ -119,6 +136,16 @@ OUTPUT FORMAT: Strict JSON only:
       };
     } catch (err: any) {
       console.error('Bedrock vision triage failed:', err);
+
+      // Fallback to Gemini when Bedrock fails
+      if (this.geminiPool.hasKeys()) {
+        try {
+          return await this.triageWithGemini(prompt, imageBuffer, mimeType);
+        } catch (geminiErr: any) {
+          console.error('Gemini vision triage fallback failed:', geminiErr);
+        }
+      }
+
       return {
         category: 'ambiguous_unclear',
         isAmbiguous: true,
@@ -128,5 +155,43 @@ OUTPUT FORMAT: Strict JSON only:
         recommendedClarificationPrompt: 'Photo open nahi ho paayi, please batayein aapko kya dikkat aa rahi hai?'
       };
     }
+  }
+
+  private async triageWithGemini(
+    prompt: string,
+    imageBuffer: Buffer,
+    mimeType: string
+  ): Promise<ScreenshotTriageResult> {
+    const text = await this.geminiPool.generateContent({
+      prompt,
+      imageBuffer,
+      imageMimeType: mimeType,
+      temperature: 0.1,
+      maxOutputTokens: 512,
+    });
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        category: parsed.category || 'ambiguous_unclear',
+        isAmbiguous: parsed.isAmbiguous ?? (parsed.category === 'ambiguous_unclear'),
+        extractedErrorText: parsed.extractedErrorText,
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.85,
+        identifiedIssue: parsed.identifiedIssue || 'Screenshot parsed via Gemini',
+        suggestedAction: parsed.suggestedAction || 'Review issue with user',
+        recommendedClarificationPrompt: parsed.recommendedClarificationPrompt ||
+          'Screenshot me issue clearly nahi dikh raha hai. Please thoda detail me batayein kya problem aa rahi hai?'
+      };
+    }
+
+    return {
+      category: 'ambiguous_unclear',
+      isAmbiguous: true,
+      confidence: 0.5,
+      identifiedIssue: 'Could not structure Gemini vision output',
+      suggestedAction: 'Ask user for clarification',
+      recommendedClarificationPrompt: 'Aapne jo photo bheji hai usme error clear nahi hai, please batayein screen par kya likha aa raha hai?'
+    };
   }
 }
