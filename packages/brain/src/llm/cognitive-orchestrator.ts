@@ -128,9 +128,11 @@ User Sentiment: ${perception.sentiment} (Address their emotional state calmly an
 User Intent: ${perception.primaryIntent}
 
 NEGATIVE CONSTRAINTS (NEVER VIOLATE):
+- Current task reward is ₹2.50 per successfully sent message (never say ₹4 or other amounts).
 - Never promise fixed task release times (advertiser dependent).
 - Never claim LUMO reads personal WhatsApp chats or steals data.
-- Never tell users experiencing repeated bans that they spammed; provide the 7-8 day safety routine.
+- If WhatsApp is permanently banned or shows "This account can't use WhatsApp" / "Requesting a review is not available", NEVER suggest the 7-8 day safety tips; tell them to appeal directly to WhatsApp Support (in-app Support or support@whatsapp.com, wait 24-72 hours).
+- For active accounts or temporary ban prevention, provide the 7-8 day safety routine.
 - Never reset passwords manually; direct to lumodone.com/login Forgot Password.
 - Never promise referral rewards before 20 effective tasks + valid bank are completed.
 
@@ -209,29 +211,73 @@ ${memory.approvedExamples.map(e => `Q: "${e.userMessage}"\nA: "${e.approvedReply
 
   private generateKnowledgeFallback(text: string, dialect: 'hi' | 'hinglish' | 'en'): string {
     const lower = text.toLowerCase();
-    
-    // Earning / How to earn in LUMO
-    if (lower.includes('earn') || lower.includes('kamai') || lower.includes('kama') || lower.includes('paise')) {
+
+    // 1. Permanent WhatsApp ban / review unavailable appeal
+    const isPermanentBan = (
+      lower.includes('permanent') ||
+      lower.includes('permanently') ||
+      lower.includes("can't use") ||
+      lower.includes('cant use') ||
+      lower.includes('review')
+    ) && (lower.includes('ban') || lower.includes('whatsapp') || lower.includes('block') || lower.includes('account'));
+
+    if (isPermanentBan) {
+      return dialect === 'en'
+        ? "If your WhatsApp account is permanently banned or shows 'This account can't use WhatsApp', please submit an appeal to WhatsApp: 1) Tap 'Support' in WhatsApp or go to whatsapp.com/contact (Account Issue -> Banned Account). 2) Or email support@whatsapp.com with your registered phone number (+country code) explaining it was a mistake. 3) Wait 24-72 hours for review. Avoid using modified apps like GBWhatsApp."
+        : "Agar aapka WhatsApp permanently ban ho gaya hai ya 'This account can\'t use WhatsApp' show ho raha hai, toh WhatsApp support se appeal karein: 1. WhatsApp open karke 'Support' par jayein ya whatsapp.com/contact par Account Issue -> Banned Account chunein. 2. Ya support@whatsapp.com par apna number (+country code) ke sath email bhejein. 3. 24-72 ghante wait karein. GBWhatsApp jaisi modified apps use na karein.";
+    }
+
+    // 2. Task payout amount / Per-task rate / Earning (Prioritize over task release timing)
+    if (
+      lower.includes('earn') ||
+      lower.includes('kamai') ||
+      lower.includes('kama') ||
+      lower.includes('paise') ||
+      lower.includes('paisa') ||
+      lower.includes('per task') ||
+      lower.includes('kitna milega') ||
+      lower.includes('kitna paisa') ||
+      lower.includes('kitne paise') ||
+      lower.includes('kitna task') ||
+      lower.includes('rate')
+    ) {
       return dialect === 'en'
         ? 'In LUMO, you earn by completing WhatsApp tasks (₹2.50 per successfully sent message). You can also earn referral rewards: ₹20 + 16% lifetime commission when your friend joins with your link, adds a valid bank account, and completes 20 WhatsApp message tasks.'
         : 'LUMO me kamayi WhatsApp tasks se hoti hai (har successful message send karne par ₹2.50 milta hai). Iske alawa Referral Reward: ₹20 + 16% lifetime commission milta hai jab aapka dost aapke link se judta hai, valid bank add karta hai aur 20 WhatsApp tasks complete karta hai.';
     }
 
-    // Task timing
-    if (lower.includes('task') || lower.includes('kab aayega') || lower.includes('time')) {
+    // 3. Batch task verification & reward credit
+    if (lower.includes('batch') || lower.includes('verification') || lower.includes('reward awaiting') || (lower.includes('wallet') && lower.includes('task'))) {
+      return dialect === 'en'
+        ? 'LUMO tasks are released in batches. After sending, background verification takes about 10 minutes. Once verified, your reward is automatically credited to your wallet.'
+        : 'LUMO me tasks batch wise aate hain. Message send karne ke baad background verification me lagbhag 10 minutes lagte hain. Verification complete hone par reward automatically aapke wallet me add ho jata hai.';
+    }
+
+    // 4. WhatsApp connecting / link / fetch
+    if (lower.includes('fetch') || lower.includes('preparing') || (lower.includes('link') && lower.includes('whatsapp'))) {
+      return dialect === 'en'
+        ? 'When linking or fetching WhatsApp in LUMO, preparing the connection usually succeeds within 10 minutes. Please keep the app open and wait.'
+        : 'LUMO me WhatsApp link ya fetch karte samay "Preparing your WhatsApp connection" aane par 10 minutes tak wait karein, yeh aamtaur par 10 minutes ke andar connect ho jata hai.';
+    }
+
+    // 5. Task timing & release schedule
+    if (
+      (lower.includes('task') && (lower.includes('kab') || lower.includes('time') || lower.includes('when') || lower.includes('release') || lower.includes('baje'))) ||
+      lower.includes('kab aayega')
+    ) {
       return dialect === 'en'
         ? 'Tasks do not have a fixed release time as they depend on advertisers. You will receive an instant notification in the group as soon as tasks are released.'
         : 'Task aane ka koi fixed time nahi hota hai, yeh advertisers par depend karta hai. Jaise hi task release hoga hum group me notification bhej denge.';
     }
 
-    // Withdrawal
+    // 6. Withdrawal
     if (lower.includes('withdraw') || lower.includes('payment') || lower.includes('nikal')) {
       return dialect === 'en'
         ? 'Your withdrawal request is being processed and will be credited within 24 hours. Thank you for your patience!'
         : 'Aapka withdrawal request process ho raha hai aur 24 hours ke andar complete ho jayega. Kripya thoda dhairya banaye rakhein!';
     }
 
-    // WhatsApp ban / restriction
+    // 7. General WhatsApp ban prevention / warm-up (for active accounts)
     if (lower.includes('ban') || lower.includes('restrict') || lower.includes('block')) {
       return dialect === 'en'
         ? 'To protect your WhatsApp, add 3-5 trusted contacts, make regular voice/video calls, and follow LUMO safety tips for 7-8 days. Do not link your WhatsApp to multiple platforms.'
