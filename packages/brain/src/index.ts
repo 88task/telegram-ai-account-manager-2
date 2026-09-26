@@ -83,13 +83,12 @@ export class BrainPipeline {
         incoming.text
       );
 
-      // If ambiguous, clarify politely in Hinglish/English
-      if (screenshotAnalysis.isAmbiguous && screenshotAnalysis.recommendedClarificationPrompt) {
+      // Look once: if screenshot does not match a known issue, skip silently (no reply)
+      if (screenshotAnalysis.isAmbiguous) {
         return {
-          action: mode === 'auto_pilot' ? 'auto_sent' : 'approval_required',
-          replyText: screenshotAnalysis.recommendedClarificationPrompt,
-          confidence: 0.9,
-          reason: `Screenshot ambiguous: asking user for clarification. Issue: ${screenshotAnalysis.identifiedIssue}`,
+          action: 'ignored',
+          confidence: screenshotAnalysis.confidence,
+          reason: `Screenshot reviewed: no matching issue found (${screenshotAnalysis.identifiedIssue}). Skipped without reply.`,
           screenshotAnalysis
         };
       }

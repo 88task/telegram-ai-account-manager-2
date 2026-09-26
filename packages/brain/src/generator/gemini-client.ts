@@ -7,6 +7,7 @@ export interface GeminiContentOptions {
   imageMimeType?: string;
   temperature?: number;
   maxOutputTokens?: number;
+  jsonMode?: boolean;
 }
 
 export class GeminiClientPool {
@@ -87,6 +88,7 @@ export class GeminiClientPool {
       generationConfig: {
         temperature: opts.temperature ?? 0.3,
         maxOutputTokens: opts.maxOutputTokens ?? 1024,
+        ...(opts.jsonMode ? { responseMimeType: 'application/json' } : {}),
       },
     };
 

@@ -12,6 +12,8 @@ export type ScreenshotCategory =
   | 'bank_account_error'          // Unsupported bank / invalid IFSC
   | 'task_submission_error'       // Failed upload, duplicate message
   | 'login_password_error'        // Invalid credentials
+  | 'batch_task_verification'     // LUMO batch task screen, reward awaiting verification
+  | 'whatsapp_linking'            // LUMO WhatsApp link/connection screen
   | 'ambiguous_unclear';          // Unreadable, cropped, or ambiguous
 
 export interface ScreenshotTriageResult {
@@ -22,6 +24,19 @@ export interface ScreenshotTriageResult {
   identifiedIssue: string;
   suggestedAction: string;
   recommendedClarificationPrompt?: string;
+}
+
+function extractJsonObject(text: string): any | null {
+  if (!text) return null;
+  const cleaned = text.replace(/```(?:json)?/gi, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    return JSON.parse(cleaned.slice(start, end + 1));
+  } catch {
+    return null;
+  }
 }
 
 export class ScreenshotTriage {
@@ -61,6 +76,8 @@ CATEGORIES:
 3. bank_account_error: Bank account linking failed, invalid IFSC, unsupported bank name.
 4. task_submission_error: WhatsApp message task screenshot, failed upload, duplicate submission error.
 5. login_password_error: Invalid password, account locked, OTP verification failed.
+7. batch_task_verification: LUMO app batch task screen, task sent and awaiting verification, batch countdown timer, or reward credited/pending.
+8. whatsapp_linking: LUMO WhatsApp link screen, "Preparing your WhatsApp connection", linked WhatsApp accounts list, or WhatsApp fetch/link status.
 6. ambiguous_unclear: The image is blurry, cropped, shows an unrelated home screen, or the actual error message cannot be determined with certainty.
 
 USER CAPTION: "${userCaption || 'No caption provided'}"
@@ -110,10 +127,9 @@ OUTPUT FORMAT: Strict JSON only:
 
       const response = await this.client.send(command);
       const text = response.output?.message?.content?.[0]?.text || '';
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      const parsed = extractJsonObject(text);
 
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed) {
         return {
           category: parsed.category || 'ambiguous_unclear',
           isAmbiguous: parsed.isAmbiguous ?? (parsed.category === 'ambiguous_unclear'),
@@ -167,12 +183,12 @@ OUTPUT FORMAT: Strict JSON only:
       imageBuffer,
       imageMimeType: mimeType,
       temperature: 0.1,
-      maxOutputTokens: 512,
+      maxOutputTokens: 1536,
+      jsonMode: true,
     });
 
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
+    const parsed = extractJsonObject(text);
+    if (parsed) {
       return {
         category: parsed.category || 'ambiguous_unclear',
         isAmbiguous: parsed.isAmbiguous ?? (parsed.category === 'ambiguous_unclear'),
