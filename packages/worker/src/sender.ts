@@ -6,6 +6,7 @@ export class TelegramSender {
 
   /**
    * Sends a message with realistic typing simulation and anti-burst delays.
+   * Quotes the message and mentions the user in group chats.
    * target can be a GramJS Message object, InputPeer, or string chat_id.
    */
   public async sendReply(target: any, text: string): Promise<number | undefined> {
@@ -42,19 +43,59 @@ export class TelegramSender {
       // Short human delay (1-2 seconds)
       await new Promise(r => setTimeout(r, 1500));
 
-      // 2. If target is a Message instance with respond(), use it directly
-      if (target && typeof target.respond === 'function') {
-        const result = await target.respond({
-          message: text,
-        });
-        return result?.id;
+      let messageText = text;
+
+      // Tag/mention the user in group chats so they receive direct notification
+      if (target && !target.isPrivate && (target.isGroup || target.isChannel)) {
+        try {
+          let mentionTag = '';
+          const sender = typeof target.getSender === 'function' ? await target.getSender() : null;
+          if (sender) {
+            if (sender.username) {
+              mentionTag = `@${sender.username}`;
+            } else {
+              const name = sender.firstName || 'User';
+              const rawId = sender.id ? String(sender.id).replace(/[^0-9]/g, '') : '';
+              if (rawId) {
+                mentionTag = `[${name}](tg://user?id=${rawId})`;
+              }
+            }
+          } else if (target.senderId) {
+            const rawId = String(target.senderId).replace(/[^0-9]/g, '');
+            if (rawId) {
+              mentionTag = `[User](tg://user?id=${rawId})`;
+            }
+          }
+
+          if (mentionTag && !messageText.startsWith(mentionTag)) {
+            messageText = `${mentionTag} ${messageText}`;
+          }
+        } catch (mentionErr) {
+          console.warn('[TelegramSender] Failed to resolve sender mention tag:', mentionErr);
+        }
       }
 
-      // Fallback: send via client using resolved peer
-      const result = await this.client.sendMessage(peer, {
-        message: text,
-      });
+      // 2. Direct Quote Reply: quotes the specific user message
+      if (target && typeof target.reply === 'function') {
+        try {
+          const result = await target.reply({
+            message: messageText,
+          });
+          return result?.id;
+        } catch (replyErr) {
+          console.warn('[TelegramSender] target.reply failed, falling back to client.sendMessage:', replyErr);
+        }
+      }
 
+      // Fallback: send via client using resolved peer and replyTo id
+      const sendOptions: any = {
+        message: messageText,
+      };
+      if (target && target.id && typeof target.id === 'number') {
+        sendOptions.replyTo = target.id;
+      }
+
+      const result = await this.client.sendMessage(peer, sendOptions);
       return result?.id;
     } catch (err) {
       console.error(`Failed to send message:`, err);
