@@ -50,11 +50,10 @@ export class GeminiClientPool {
 
       try {
         const result = await this.callGeminiApi(apiKey, this.model, opts);
-        // On success, stick with this working key
         this.currentKeyIndex = keyIndex;
         return result;
       } catch (err: any) {
-        console.warn();
+        console.warn(`[Gemini Pool] Key ${keyIndex + 1}/${this.keys.length} failed: ${err.message}. Trying next key...`);
         lastError = err;
       }
     }
@@ -63,11 +62,10 @@ export class GeminiClientPool {
   }
 
   private async callGeminiApi(apiKey: string, model: string, opts: GeminiContentOptions): Promise<string> {
-    const url = ;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const parts: any[] = [];
 
-    // Add image if provided (Gemini Vision)
     if (opts.imageBuffer && opts.imageBuffer.length > 0) {
       parts.push({
         inlineData: {
@@ -77,7 +75,6 @@ export class GeminiClientPool {
       });
     }
 
-    // Add text prompt
     parts.push({ text: opts.prompt });
 
     const requestBody: any = {
@@ -108,7 +105,7 @@ export class GeminiClientPool {
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error();
+      throw new Error(`Gemini API HTTP ${response.status}: ${errText}`);
     }
 
     const data: any = await response.json();
