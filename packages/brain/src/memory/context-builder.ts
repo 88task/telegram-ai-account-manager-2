@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { LUMO_KNOWLEDGE, LUMO_SAFETY_TIPS, LUMO_SUPPORTED_BANKS, searchKnowledge } from './lumo-knowledge.js';
 import { db, knowledgeItems, contacts, eq, desc } from '@telegram-ai/db';
 
@@ -22,8 +23,22 @@ export class ContextBuilder {
     const dynamicApprovedExamples: Array<{ userMessage: string; approvedReply: string }> = [];
 
     try {
-      const items = await db.select().from(knowledgeItems).orderBy(desc(knowledgeItems.createdAt)).limit(50);
-      for (const item of items) {
+      // Rank before limiting: older matching FAQs must survive newer unrelated entries.
+      // PostgreSQL lexemes match whole words ("ok" must not match "token").
+      const terms = [...new Set(queryKeywords.flatMap(query => query.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []))].slice(0, 80);
+      const document = sql`to_tsvector('simple', coalesce(${knowledgeItems.questionOrTrigger}, '') || ' ' || ${knowledgeItems.content} || ' ' || coalesce(array_to_string(${knowledgeItems.tags}, ' '), ''))`;
+      const query = terms.length ? sql.join(terms.map(term => sql`plainto_tsquery('simple', ${term})`), sql` || `) : sql`plainto_tsquery('simple', '')`;
+      // Filter candidates once and use native ranking rather than rescoring the whole
+      // document for every token. Global rules are loaded independently of the relevance cap.
+      let items = terms.length ? await db.select().from(knowledgeItems)
+        .where(sql`${knowledgeItems.category} <> 'rule' and ${document} @@ (${query})`)
+        .orderBy(desc(sql`ts_rank(${document}, (${query}))`), desc(knowledgeItems.createdAt), desc(knowledgeItems.id)).limit(50) : [];
+      if (!items.length) items = await db.select().from(knowledgeItems)
+        .where(sql`${knowledgeItems.category} <> 'rule'`)
+        .orderBy(desc(knowledgeItems.createdAt), desc(knowledgeItems.id)).limit(50);
+      const rules = await db.select().from(knowledgeItems).where(eq(knowledgeItems.category, 'rule'))
+        .orderBy(desc(knowledgeItems.createdAt), desc(knowledgeItems.id));
+      for (const item of [...rules, ...items]) {
         if (item.category === 'rule' || item.category === 'faq') {
           const prefix = item.category.toUpperCase();
           const trigger = item.questionOrTrigger ? `${item.questionOrTrigger}: ` : '';
