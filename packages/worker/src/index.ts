@@ -100,41 +100,70 @@ async function getLiveSettings() {
   }
 }
 
-async function main() {
-  const apiId = parseInt(process.env.TELEGRAM_API_ID || '', 10);
-  const apiHash = process.env.TELEGRAM_API_HASH || '';
 
-  if (!apiId || !apiHash) {
-    console.error('Missing TELEGRAM_API_ID or TELEGRAM_API_HASH.');
-    process.exit(1);
+let activeClient: TelegramClient | null = null;
+let isStarting = false;
+
+export async function stopWorker() {
+  if (activeClient) {
+    console.log('[Worker] Stopping and destroying active TelegramClient...');
+    try {
+      await activeClient.disconnect();
+      await activeClient.destroy();
+    } catch (err: any) {
+      console.warn('[Worker] Error during client disconnect/destroy:', err.message);
+    }
+    activeClient = null;
   }
+}
 
-  // Load session from env, or fall back to the active session saved from the Management Panel.
-  let sessionString = process.env.TELEGRAM_SESSION_STRING || '';
-  if (!sessionString) {
-    sessionString = await getSessionStringFromDb();
+export async function startWorker(forcedSession?: string) {
+  if (isStarting) {
+    console.log('[Worker] startWorker already in progress, skipping.');
+    return;
   }
-  while (!sessionString) {
-    console.log('No Telegram session yet. Waiting for panel login... (check the Management Dashboard)');
-    await new Promise((r) => setTimeout(r, 15000));
-    sessionString = await getSessionStringFromDb();
-  }
+  isStarting = true;
 
-  const client = new TelegramClient(new StringSession(sessionString), apiId, apiHash, {
-    connectionRetries: 10,
-  });
+  try {
+    await stopWorker();
 
-  await client.connect();
-  console.log('Connected to Telegram MTProto socket.');
+    const apiId = parseInt(process.env.TELEGRAM_API_ID || '', 10);
+    const apiHash = process.env.TELEGRAM_API_HASH || '';
 
-  const me = await client.getMe();
-  const myUserId = me.id.toString();
-  console.log(`Authenticated as: ${me.firstName} (ID: ${myUserId})`);
+    if (!apiId || !apiHash) {
+      console.warn('[Worker] Missing TELEGRAM_API_ID or TELEGRAM_API_HASH.');
+      return;
+    }
 
-  const brain = new BrainPipeline(myUserId);
-  const sender = new TelegramSender(client);
+    let sessionString = forcedSession || process.env.TELEGRAM_SESSION_STRING || '';
+    if (!sessionString) {
+      sessionString = await getSessionStringFromDb();
+    }
 
-  client.addEventHandler(async (event) => {
+    if (!sessionString) {
+      console.log('[Worker] No Telegram session yet. Waiting for panel login...');
+      return;
+    }
+
+    console.log('[Worker] Connecting to Telegram MTProto socket...');
+    const client = new TelegramClient(new StringSession(sessionString), apiId, apiHash, {
+      connectionRetries: 5,
+    });
+
+    await client.connect();
+    console.log('[Worker] Connected to Telegram MTProto socket.');
+
+    const me = await client.getMe();
+    const myUserId = me.id.toString();
+    console.log(`[Worker] Authenticated as: ${me.firstName} (ID: ${myUserId})`);
+
+    activeClient = client;
+
+    const brain = new BrainPipeline(myUserId);
+    const sender = new TelegramSender(client);
+
+    client.addEventHandler(async (event) => {
+
     const msg = event.message;
     if (!msg) return;
 
@@ -290,4 +319,9 @@ async function main() {
   console.log('Telegram AI Account Worker is listening for incoming private messages...');
 }
 
-main().catch(console.error);
+
+// Standalone runner if executed directly
+if (process.env.STANDALONE_WORKER === 'true' || (typeof process !== 'undefined' && process.argv[1]?.endsWith('worker/dist/index.js'))) {
+  startWorker().catch(console.error);
+}
+
