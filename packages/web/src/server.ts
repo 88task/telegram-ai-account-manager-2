@@ -1,3 +1,4 @@
+import { startWorker, stopWorker } from '@telegram-ai/worker';
 import express, { Request, Response } from 'express';
 import path from 'path';
 import crypto from 'crypto';
@@ -433,7 +434,8 @@ function encryptSessionString(plain: string): string {
 
 async function saveActiveSession(phone: string, sessionString: string) {
   const encrypted = encryptSessionString(sessionString);
-  await db.update(telegramSessions).set({ isActive: false, updatedAt: new Date() }).where(eq(telegramSessions.isActive, true));
+  await stopWorker();
+    await db.update(telegramSessions).set({ isActive: false, updatedAt: new Date() }).where(eq(telegramSessions.isActive, true));
   await db.insert(telegramSessions).values({
     userId: phone, phone, encryptedSessionString: encrypted, isActive: true,
   }).onConflictDoUpdate({
@@ -480,8 +482,14 @@ app.post('/api/auth/verify-code', async (req: Request, res: Response) => {
     }));
     const sessionString = (pending.client.session as StringSession).save() as unknown as string;
     await saveActiveSession(phone, sessionString);
-    try { await pending.client.disconnect(); } catch {}
+    try {
+      await pending.client.disconnect();
+      await pending.client.destroy();
+    } catch {}
     pendingLogins.delete(phone);
+    setTimeout(() => {
+      startWorker(sessionString).catch((err) => console.error('[Web] Failed to start co-located worker:', err));
+    }, 1500);
     res.json({ success: true, requiresPassword: false, message: 'Telegram connected' });
   } catch (error: any) {
     if (error.errorMessage === 'SESSION_PASSWORD_NEEDED') {
@@ -503,8 +511,14 @@ app.post('/api/auth/submit-password', async (req: Request, res: Response) => {
     await pending.client.invoke(new Api.auth.CheckPassword({ password: srp }));
     const sessionString = (pending.client.session as StringSession).save() as unknown as string;
     await saveActiveSession(phone, sessionString);
-    try { await pending.client.disconnect(); } catch {}
+    try {
+      await pending.client.disconnect();
+      await pending.client.destroy();
+    } catch {}
     pendingLogins.delete(phone);
+    setTimeout(() => {
+      startWorker(sessionString).catch((err) => console.error('[Web] Failed to start co-located worker:', err));
+    }, 1500);
     res.json({ success: true, message: 'Telegram connected with 2FA' });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.errorMessage || error.message });
@@ -515,6 +529,7 @@ app.post('/api/auth/submit-password', async (req: Request, res: Response) => {
 
 app.post('/api/auth/disconnect', async (req: Request, res: Response) => {
   try {
+    await stopWorker();
     await db.update(telegramSessions).set({ isActive: false, updatedAt: new Date() }).where(eq(telegramSessions.isActive, true));
     await db.insert(auditLogs).values({
       eventType: 'session_disconnected',
@@ -533,6 +548,8 @@ initDb()
   .then(() => {
     app.listen(port, () => {
       console.log(`Telegram AI Management Panel listening at http://localhost:${port}`);
+      // Boot co-located worker inside web process
+      startWorker().catch((err) => console.error('[Web] Error booting worker:', err));
     });
   })
   .catch((err) => {
