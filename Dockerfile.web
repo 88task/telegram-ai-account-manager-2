@@ -8,16 +8,19 @@ COPY package.json pnpm-workspace.yaml ./
 COPY tsconfig.json ./
 COPY packages/db/package.json packages/db/
 COPY packages/brain/package.json packages/brain/
+COPY packages/worker/package.json packages/worker/
 COPY packages/web/package.json packages/web/
 
 RUN pnpm install --no-frozen-lockfile --ignore-scripts
 
 COPY packages/db packages/db
 COPY packages/brain packages/brain
+COPY packages/worker packages/worker
 COPY packages/web packages/web
 
 RUN pnpm --filter @telegram-ai/db build
 RUN pnpm --filter @telegram-ai/brain build
+RUN pnpm --filter @telegram-ai/worker build
 RUN pnpm --filter @telegram-ai/web build
 
 FROM node:20-alpine AS runner
@@ -28,12 +31,14 @@ RUN npm install -g pnpm
 COPY package.json pnpm-workspace.yaml ./
 COPY packages/db/package.json packages/db/
 COPY packages/brain/package.json packages/brain/
+COPY packages/worker/package.json packages/worker/
 COPY packages/web/package.json packages/web/
 
 RUN pnpm install --prod --no-frozen-lockfile --ignore-scripts
 
 COPY --from=builder /app/packages/db/dist packages/db/dist
 COPY --from=builder /app/packages/brain/dist packages/brain/dist
+COPY --from=builder /app/packages/worker/dist packages/worker/dist
 COPY --from=builder /app/packages/web/dist packages/web/dist
 COPY packages/web/src/public packages/web/dist/public
 
