@@ -139,8 +139,45 @@ ${memory.approvedExamples.map(e => `Q: "${e.userMessage}"\nA: "${e.approvedReply
       inferenceConfig: { temperature: 0.3, maxTokens: 512 }
     });
 
-    const res = await this.client.send(command);
-    return res.output?.message?.content?.[0]?.text || '';
+    try {
+      const res = await this.client.send(command);
+      return res.output?.message?.content?.[0]?.text || '';
+    } catch (err: any) {
+      console.error('Bedrock synthesizeDraft failed:', err);
+      return this.generateKnowledgeFallback(message.text || '', perception.detectedDialect);
+    }
+  }
+
+  private generateKnowledgeFallback(text: string, dialect: 'hi' | 'hinglish' | 'en'): string {
+    const lower = text.toLowerCase();
+    if (lower.includes('task') || lower.includes('kab aayega') || lower.includes('time')) {
+      return dialect === 'en'
+        ? 'Tasks do not have a fixed release time as they depend on advertisers. You will receive an instant notification in the group as soon as tasks are released.'
+        : 'Task aane ka koi fixed time nahi hota hai, yeh advertisers par depend karta hai. Jaise hi task release hoga hum group me notification bhej denge.';
+    }
+    if (lower.includes('withdraw') || lower.includes('paisa') || lower.includes('payment') || lower.includes('nikal')) {
+      return dialect === 'en'
+        ? 'Your withdrawal request is being processed and will be credited within 24 hours. Thank you for your patience!'
+        : 'Aapka withdrawal request process ho raha hai aur 24 hours ke andar complete ho jayega. Kripya thoda dhairya banaye rakhein!';
+    }
+    if (lower.includes('ban') || lower.includes('restrict') || lower.includes('block')) {
+      return dialect === 'en'
+        ? 'To protect your WhatsApp, add 3-5 trusted contacts, make regular voice/video calls, and follow LUMO safety tips for 7-8 days. Do not link your WhatsApp to multiple platforms.'
+        : 'WhatsApp ban se bachne ke liye 3-5 trusted contacts se daily chat karein, calls karein aur status upload karein. LUMO ke safety tips 7-8 din tak follow karein aur kisi dusre platform par account link mat karein.';
+    }
+    if (lower.includes('download') || lower.includes('install') || lower.includes('apk')) {
+      return dialect === 'en'
+        ? 'You can download LUMO from lumodone.com/download. Please check whether your device is 32-bit or 64-bit to install the matching version.'
+        : 'Aap lumodone.com/download se LUMO download kar sakte hain. Apne phone ka version (32-bit ya 64-bit) check karke sahi version download karein.';
+    }
+    if (lower.includes('password') || lower.includes('login') || lower.includes('forgot')) {
+      return dialect === 'en'
+        ? 'You can easily reset your password using the "Forgot Password" option on lumodone.com/login.'
+        : 'Aap apna password lumodone.com/login par jaakar "Forgot Password" option se reset kar sakte hain.';
+    }
+    return dialect === 'en'
+      ? 'Hello! How can I assist you with LUMO today?'
+      : 'Namaste! Main LUMO help desk se hoon. Batayein main aapki kya sahayata kar sakta hoon?';
   }
 
   /**
