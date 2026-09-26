@@ -317,6 +317,11 @@ export async function startWorker(forcedSession?: string) {
   }, new NewMessage({}));
 
   console.log('Telegram AI Account Worker is listening for incoming private messages...');
+  } catch (err: any) {
+    console.error('[Worker] Failed to start worker:', err);
+  } finally {
+    isStarting = false;
+  }
 }
 
 
