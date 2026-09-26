@@ -1,4 +1,4 @@
-import { TelegramClient, Api } from 'telegram';
+import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { NewMessage } from 'telegram/events/index.js';
 import { BrainPipeline, OperatingMode } from '@telegram-ai/brain';
@@ -73,6 +73,8 @@ async function getLiveSettings() {
       .split(',').map(s => s.trim()).filter(Boolean);
     const blockedUserIds = (map.get('blocked_user_ids') || process.env.BLOCKED_USER_IDS || '')
       .split(',').map(s => s.trim()).filter(Boolean);
+    const ignoredAdminIds = (map.get('ignored_admin_ids') || process.env.IGNORED_ADMIN_IDS || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
     const geminiMode = (map.get('ai_provider_mode') || process.env.AI_PROVIDER_MODE || 'auto') as 'auto' | 'gemini' | 'bedrock';
     const geminiModel = map.get('gemini_model') || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
     const geminiKeys = decryptGeminiKeys(map.get('gemini_keys_encrypted') || '');
@@ -82,6 +84,7 @@ async function getLiveSettings() {
       emergencyKillSwitch: killSwitch,
       allowedGroupIds,
       blockedUserIds,
+      ignoredAdminIds,
       geminiKeys,
       geminiModel,
       geminiMode,
@@ -93,6 +96,7 @@ async function getLiveSettings() {
       emergencyKillSwitch: false,
       allowedGroupIds: (process.env.ALLOWED_GROUP_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
       blockedUserIds: (process.env.BLOCKED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
+      ignoredAdminIds: (process.env.IGNORED_ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
       geminiKeys: [] as string[],
       geminiModel: 'gemini-2.5-flash',
       geminiMode: 'auto' as const,
@@ -106,78 +110,6 @@ function normalizeId(id: any): string {
   if (id === null || id === undefined) return '';
   const str = typeof id === 'object' && id.toString ? id.toString() : String(id);
   return str.replace(/[^0-9-]/g, '');
-}
-
-interface AdminCacheEntry {
-  adminIds: Set<string>;
-  expiresAt: number;
-}
-const groupAdminCache = new Map<string, AdminCacheEntry>();
-
-async function isSenderAdminInChat(
-  client: TelegramClient,
-  msg: any,
-  chatId: string,
-  senderId: string
-): Promise<boolean> {
-  const normChatId = normalizeId(chatId);
-  const normSenderId = normalizeId(senderId);
-  if (!normChatId || !normSenderId) return false;
-
-  // In Telegram supergroups, an admin posting anonymously has senderId === chatId
-  if (normSenderId === normChatId) {
-    return true;
-  }
-
-  const now = Date.now();
-  const cached = groupAdminCache.get(normChatId);
-  if (cached && cached.expiresAt > now) {
-    return cached.adminIds.has(normSenderId);
-  }
-
-  const adminIds = new Set<string>();
-
-  try {
-    const inputChat = await msg.getInputChat();
-    if (inputChat) {
-      const admins = await client.getParticipants(inputChat, {
-        filter: new Api.ChannelParticipantsAdmins(),
-      });
-      if (Array.isArray(admins)) {
-        for (const admin of admins) {
-          const normId = normalizeId(admin?.id);
-          if (normId) {
-            adminIds.add(normId);
-          }
-        }
-      }
-    }
-  } catch (err: any) {
-    try {
-      const entity: any = await client.getEntity(msg.chatId);
-      if (entity?.className === 'Chat') {
-        const fullChat: any = await client.invoke(new Api.messages.GetFullChat({ chatId: entity.id }));
-        const participants = fullChat?.fullChat?.participants?.participants || [];
-        for (const p of participants) {
-          if (p.className === 'ChatParticipantAdmin' || p.className === 'ChatParticipantCreator') {
-            const normId = normalizeId(p.userId);
-            if (normId) {
-              adminIds.add(normId);
-            }
-          }
-        }
-      }
-    } catch (fallbackErr: any) {
-      console.warn('[worker] Failed to fetch participants fallback:', fallbackErr.message);
-    }
-  }
-
-  groupAdminCache.set(normChatId, {
-    adminIds,
-    expiresAt: now + 5 * 60 * 1000,
-  });
-
-  return adminIds.has(normSenderId);
 }
 
 let activeClient: TelegramClient | null = null;
@@ -295,7 +227,7 @@ export async function startWorker(forcedSession?: string) {
 
     // Check live settings from DB (Kill switch & Mode)
     const settings = await getLiveSettings();
-    brain.updateScope(settings.allowedGroupIds, settings.blockedUserIds);
+    brain.updateScope(settings.allowedGroupIds, settings.blockedUserIds, settings.ignoredAdminIds);
     brain.setGeminiConfig(settings.geminiKeys || [], settings.geminiModel, settings.geminiMode);
     if (settings.emergencyKillSwitch) {
       console.log(`[Kill Switch Active] Skipping AI reply for chat ${chatId}.`);
@@ -319,15 +251,17 @@ export async function startWorker(forcedSession?: string) {
       }
     }
 
+    // Explicit admin skip: no dynamic Telegram lookup.
+    // 1) Telegram anonymous admins post with senderId === chatId.
+    // 2) IDs configured in ignored_admin_ids are skipped (reply will skip them).
     let isSenderAdmin = false;
     if (!isPrivate) {
-      try {
-        isSenderAdmin = await isSenderAdminInChat(client, msg, chatId, senderId);
-        if (isSenderAdmin) {
-          console.log(`[worker] Ignored message from admin (${senderId}) in chat (${chatId})`);
-        }
-      } catch (err: any) {
-        console.warn('[worker] Failed to check admin status:', err.message);
+      if (senderId && senderId === chatId) {
+        isSenderAdmin = true;
+        console.log(`[worker] Ignored message from anonymous admin (senderId === chatId ${chatId})`);
+      } else if (settings.ignoredAdminIds.includes(senderId)) {
+        isSenderAdmin = true;
+        console.log(`[worker] Ignored message from configured admin ID (${senderId}) in chat (${chatId})`);
       }
     }
 

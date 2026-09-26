@@ -156,9 +156,10 @@ export class BrainPipeline {
     this.screenshotTriage.setGeminiConfig(keys, model, mode);
   }
 
-  public updateScope(allowedGroups: string[], blockedUsers: string[]): void {
+  public updateScope(allowedGroups: string[], blockedUsers: string[], ignoredAdmins: string[] = []): void {
     this.scopeFilter.updateAllowedGroups(allowedGroups);
     this.scopeFilter.updateBlockedUsers(blockedUsers);
+    this.scopeFilter.updateIgnoredAdmins(ignoredAdmins);
   }
 
   public getFeedbackLearner(): FeedbackLearner {

@@ -37,6 +37,7 @@ app.get('/api/stats', async (req: Request, res: Response) => {
     const [killSwitchSetting] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'emergency_kill_switch')).limit(1);
     const [allowedGroupsSetting] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'allowed_group_ids')).limit(1);
     const [blockedUsersSetting] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'blocked_user_ids')).limit(1);
+    const [ignoredAdminsSetting] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'ignored_admin_ids')).limit(1);
 
     res.json({
       success: true,
@@ -57,7 +58,8 @@ app.get('/api/stats', async (req: Request, res: Response) => {
           operatingMode: modeSetting?.value || process.env.DEFAULT_OPERATING_MODE || 'auto_pilot',
           emergencyKillSwitch: killSwitchSetting?.value === 'true',
           allowedGroupIds: (allowedGroupsSetting?.value || process.env.ALLOWED_GROUP_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
-          blockedUserIds: (blockedUsersSetting?.value || process.env.BLOCKED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
+          blockedUserIds: (blockedUsersSetting?.value || process.env.BLOCKED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
+          ignoredAdminIds: (ignoredAdminsSetting?.value || process.env.IGNORED_ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
         }
       }
     });
@@ -191,7 +193,7 @@ app.post('/api/approvals/:id/decide', async (req: Request, res: Response) => {
 // 6. Dynamic System Settings (Mode, Kill Switch, Groups, Blocked Users)
 app.post('/api/settings', async (req: Request, res: Response) => {
   try {
-    const { operatingMode, emergencyKillSwitch, allowedGroupIds, blockedUserIds } = req.body;
+    const { operatingMode, emergencyKillSwitch, allowedGroupIds, blockedUserIds, ignoredAdminIds } = req.body;
 
     const upsertSetting = async (key: string, value: string) => {
       const [existing] = await db.select().from(systemSettings).where(eq(systemSettings.key, key)).limit(1);
@@ -206,6 +208,7 @@ app.post('/api/settings', async (req: Request, res: Response) => {
     if (emergencyKillSwitch !== undefined) await upsertSetting('emergency_kill_switch', String(emergencyKillSwitch));
     if (allowedGroupIds !== undefined) await upsertSetting('allowed_group_ids', Array.isArray(allowedGroupIds) ? allowedGroupIds.join(',') : allowedGroupIds);
     if (blockedUserIds !== undefined) await upsertSetting('blocked_user_ids', Array.isArray(blockedUserIds) ? blockedUserIds.join(',') : blockedUserIds);
+    if (ignoredAdminIds !== undefined) await upsertSetting('ignored_admin_ids', Array.isArray(ignoredAdminIds) ? ignoredAdminIds.join(',') : ignoredAdminIds);
 
     await db.insert(auditLogs).values({
       eventType: 'settings_updated',

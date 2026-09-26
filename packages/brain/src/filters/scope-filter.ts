@@ -3,14 +3,22 @@ import { ScopeCheckResult, TelegramIncomingMessage } from '../types.js';
 export class ScopeFilter {
   private allowedGroupIds: Set<string>;
   private blockedUserIds: Set<string>;
+  private ignoredAdminIds: Set<string>;
 
-  constructor(allowedGroupsConfig?: string | string[], blockedUsersConfig?: string | string[]) {
+  constructor(
+    allowedGroupsConfig?: string | string[],
+    blockedUsersConfig?: string | string[],
+    ignoredAdminsConfig?: string | string[]
+  ) {
     const rawGroups = Array.isArray(allowedGroupsConfig)
       ? allowedGroupsConfig.join(',')
       : (allowedGroupsConfig || process.env.ALLOWED_GROUP_IDS || '');
     const rawBlocked = Array.isArray(blockedUsersConfig)
       ? blockedUsersConfig.join(',')
       : (blockedUsersConfig || process.env.BLOCKED_USER_IDS || '');
+    const rawIgnoredAdmins = Array.isArray(ignoredAdminsConfig)
+      ? ignoredAdminsConfig.join(',')
+      : (ignoredAdminsConfig || process.env.IGNORED_ADMIN_IDS || '');
 
     this.allowedGroupIds = new Set(
       rawGroups.split(',').map(s => s.trim()).filter(Boolean)
@@ -18,6 +26,13 @@ export class ScopeFilter {
     this.blockedUserIds = new Set(
       rawBlocked.split(',').map(s => s.trim()).filter(Boolean)
     );
+    this.ignoredAdminIds = new Set(
+      rawIgnoredAdmins.split(',').map(s => s.trim()).filter(Boolean)
+    );
+  }
+
+  public updateIgnoredAdmins(adminIds: string[]): void {
+    this.ignoredAdminIds = new Set(adminIds.map(s => s.trim()).filter(Boolean));
   }
 
   public updateBlockedUsers(userIds: string[]): void {
@@ -38,7 +53,7 @@ export class ScopeFilter {
       };
     }
 
-    // 2. Ignore group administrators in group chats
+    // 2. Ignore admins in group chats (anonymous admin posts + explicitly configured admin IDs)
     if (!msg.isPrivateChat && msg.isSenderAdmin) {
       return {
         allowed: false,
