@@ -42,7 +42,7 @@ export const LUMO_KNOWLEDGE: KnowledgeEntry[] = [
     category: 'earning',
     title: 'How users earn on LUMO',
     content: `Users earn by linking their WhatsApp and sending messages manually.
-- ₹4 per successfully sent message.
+- ₹2.5 per successfully sent message.
 - Only WhatsApp tasks are currently live on the platform; RCS tasks are a possible future feature.
 - Task timing is NOT fixed. Tasks release depending on the advertiser. When a task is released, the group is notified immediately and users receive a notification.`,
     keywords: ['earn', 'money', 'paise', 'task', 'kab aayega', 'payment per message', 'rcs', 'fixed time'],
