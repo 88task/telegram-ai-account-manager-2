@@ -90,7 +90,7 @@ OUTPUT STRICT JSON ONLY:
       primaryIntent: 'general_support',
       sentiment: 'neutral',
       urgency: 'medium',
-      detectedDialect: 'hinglish',
+      detectedDialect: this.detectDialectOffline(message.text || ''),
       implicitNeeds: ['Needs assistance']
     };
   }
@@ -148,33 +148,74 @@ ${memory.approvedExamples.map(e => `Q: "${e.userMessage}"\nA: "${e.approvedReply
     }
   }
 
+  private detectDialectOffline(text: string): 'hi' | 'hinglish' | 'en' {
+    if (!text) return 'en';
+    // Check for Devanagari Hindi characters
+    if (/[ऀ-ॿ]/.test(text)) return 'hi';
+    const lower = text.toLowerCase();
+    const hindiWords = [
+      'kaise', 'karna', 'kare', 'karein', 'kya', 'hai', 'hain', 'ho', 'gaya', 'geya', 'aayega',
+      'nahi', 'mat', 'bhejo', 'paisa', 'batayein', 'batao', 'chahiye', 'kuch', 'hoga', 'mera',
+      'meri', 'apna', 'bhai', 'sir', 'kabh', 'kitne', 'baar', 'bohot', 'sabse', 'yeh', 'woh'
+    ];
+    const words = lower.split(/\s+/);
+    const hasHindiWord = words.some(w => hindiWords.includes(w.replace(/[^a-z]/g, '')));
+    if (hasHindiWord) return 'hinglish';
+    return 'en';
+  }
+
   private generateKnowledgeFallback(text: string, dialect: 'hi' | 'hinglish' | 'en'): string {
     const lower = text.toLowerCase();
+    
+    // Earning / How to earn in LUMO
+    if (lower.includes('earn') || lower.includes('kamai') || lower.includes('kama') || lower.includes('paise')) {
+      return dialect === 'en'
+        ? 'In LUMO, you earn by completing WhatsApp tasks (₹4 per successfully sent message). You can also earn referral rewards: ₹20 + 16% lifetime commission when your friend joins with your link, adds a valid bank account, and completes 20 WhatsApp message tasks.'
+        : 'LUMO me kamayi WhatsApp tasks se hoti hai (har successful message send karne par ₹4 milta hai). Iske alawa Referral Reward: ₹20 + 16% lifetime commission milta hai jab aapka dost aapke link se judta hai, valid bank add karta hai aur 20 WhatsApp tasks complete karta hai.';
+    }
+
+    // Task timing
     if (lower.includes('task') || lower.includes('kab aayega') || lower.includes('time')) {
       return dialect === 'en'
         ? 'Tasks do not have a fixed release time as they depend on advertisers. You will receive an instant notification in the group as soon as tasks are released.'
         : 'Task aane ka koi fixed time nahi hota hai, yeh advertisers par depend karta hai. Jaise hi task release hoga hum group me notification bhej denge.';
     }
-    if (lower.includes('withdraw') || lower.includes('paisa') || lower.includes('payment') || lower.includes('nikal')) {
+
+    // Withdrawal
+    if (lower.includes('withdraw') || lower.includes('payment') || lower.includes('nikal')) {
       return dialect === 'en'
         ? 'Your withdrawal request is being processed and will be credited within 24 hours. Thank you for your patience!'
         : 'Aapka withdrawal request process ho raha hai aur 24 hours ke andar complete ho jayega. Kripya thoda dhairya banaye rakhein!';
     }
+
+    // WhatsApp ban / restriction
     if (lower.includes('ban') || lower.includes('restrict') || lower.includes('block')) {
       return dialect === 'en'
         ? 'To protect your WhatsApp, add 3-5 trusted contacts, make regular voice/video calls, and follow LUMO safety tips for 7-8 days. Do not link your WhatsApp to multiple platforms.'
         : 'WhatsApp ban se bachne ke liye 3-5 trusted contacts se daily chat karein, calls karein aur status upload karein. LUMO ke safety tips 7-8 din tak follow karein aur kisi dusre platform par account link mat karein.';
     }
+
+    // Download & APK
     if (lower.includes('download') || lower.includes('install') || lower.includes('apk')) {
       return dialect === 'en'
         ? 'You can download LUMO from lumodone.com/download. Please check whether your device is 32-bit or 64-bit to install the matching version.'
         : 'Aap lumodone.com/download se LUMO download kar sakte hain. Apne phone ka version (32-bit ya 64-bit) check karke sahi version download karein.';
     }
+
+    // Password reset
     if (lower.includes('password') || lower.includes('login') || lower.includes('forgot')) {
       return dialect === 'en'
         ? 'You can easily reset your password using the "Forgot Password" option on lumodone.com/login.'
         : 'Aap apna password lumodone.com/login par jaakar "Forgot Password" option se reset kar sakte hain.';
     }
+
+    // Greeting
+    if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
+      return dialect === 'en'
+        ? 'Hello! How can I help you with LUMO tasks, withdrawals, or earning today?'
+        : 'Namaste! LUMO tasks, withdrawal ya earning ke baare me main aapki kya sahayata kar sakta hoon?';
+    }
+
     return dialect === 'en'
       ? 'Hello! How can I assist you with LUMO today?'
       : 'Namaste! Main LUMO help desk se hoon. Batayein main aapki kya sahayata kar sakta hoon?';
