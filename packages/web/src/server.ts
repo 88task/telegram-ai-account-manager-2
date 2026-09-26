@@ -1,4 +1,6 @@
-import { startWorker, stopWorker } from '@telegram-ai/worker';
+import { panelAuth } from './panel-auth.js';
+import { PendingLogins, disposeLoginClient } from './pending-logins.js';
+import { startWorker, stopWorker, sendManagedReply } from '@telegram-ai/worker';
 import express, { Request, Response } from 'express';
 import path from 'path';
 import crypto from 'crypto';
@@ -8,7 +10,7 @@ import { computeCheck } from 'telegram/Password.js';
 import { Api } from 'telegram';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { db, initDb, conversations, messages, approvalQueue, contacts, knowledgeItems, auditLogs, systemSettings, telegramSessions, eq, desc, and, sql } from '@telegram-ai/db';
+import { db, initDb, encryptSecret, encryptionKey, defaultOperatingMode, inArray, conversations, messages, approvalQueue, contacts, knowledgeItems, auditLogs, systemSettings, telegramSessions, eq, desc, and, sql } from '@telegram-ai/db';
 
 dotenv.config();
 
@@ -18,7 +20,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(express.json());
+app.get('/healthz', (_req, res) => res.json({ ok: true }));
+app.use(panelAuth);
+app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // 1. Overview & Health KPI metrics
@@ -29,7 +33,7 @@ app.get('/api/stats', async (req: Request, res: Response) => {
     const unansweredCount = allConvs.filter(c => c.unanswered).length;
     const humanReviewCount = allConvs.filter(c => c.requiresHumanReview).length;
     
-    const pendingApprovals = await db.select().from(approvalQueue).where(eq(approvalQueue.status, 'pending'));
+    const pendingApprovals = await db.select().from(approvalQueue).where(inArray(approvalQueue.status, ['pending', 'sending', 'delivery_unknown']));
     const blockedContacts = await db.select().from(contacts).where(eq(contacts.isBlocked, true));
     
     // Read dynamic settings
@@ -56,11 +60,11 @@ app.get('/api/stats', async (req: Request, res: Response) => {
           blockedContacts: blockedContacts.length
         },
         settings: {
-          operatingMode: modeSetting?.value || process.env.DEFAULT_OPERATING_MODE || 'auto_pilot',
+          operatingMode: modeSetting?.value ?? defaultOperatingMode(),
           emergencyKillSwitch: killSwitchSetting?.value === 'true',
-          allowedGroupIds: (allowedGroupsSetting?.value || process.env.ALLOWED_GROUP_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
-          blockedUserIds: (blockedUsersSetting?.value || process.env.BLOCKED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
-          ignoredAdminIds: (ignoredAdminsSetting?.value || process.env.IGNORED_ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
+          allowedGroupIds: (allowedGroupsSetting?.value ?? process.env.ALLOWED_GROUP_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean),
+          blockedUserIds: (blockedUsersSetting?.value ?? process.env.BLOCKED_USER_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean),
+          ignoredAdminIds: (ignoredAdminsSetting?.value ?? process.env.IGNORED_ADMIN_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean),
           taskAvailability: (taskAvailabilitySetting?.value || 'true') === 'true'
         }
       }
@@ -101,8 +105,9 @@ app.get('/api/conversations/:chatId/messages', async (req: Request, res: Respons
     const chatMessages = await db.select()
       .from(messages)
       .where(eq(messages.chatId, chatId))
-      .orderBy(messages.createdAt)
+      .orderBy(desc(messages.createdAt), desc(messages.id))
       .limit(100);
+    chatMessages.reverse();
 
     const [contact] = await db.select().from(contacts).where(eq(contacts.telegramUserId, chatId)).limit(1);
 
@@ -117,7 +122,7 @@ app.get('/api/approvals', async (req: Request, res: Response) => {
   try {
     const pending = await db.select()
       .from(approvalQueue)
-      .where(eq(approvalQueue.status, 'pending'))
+      .where(inArray(approvalQueue.status, ['pending', 'sending', 'delivery_unknown']))
       .orderBy(desc(approvalQueue.createdAt));
 
     res.json({ success: true, data: pending });
@@ -126,69 +131,74 @@ app.get('/api/approvals', async (req: Request, res: Response) => {
   }
 });
 
-// 5. Approve, Edit, or Reject an AI Draft
+// 5. Decisions claim a pending item atomically before making an external send.
 app.post('/api/approvals/:id/decide', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const { action, editedReply } = req.body;
+  if (!Number.isInteger(id) || !['approve', 'edit', 'reject'].includes(action) || (action === 'edit' && (typeof editedReply !== 'string' || !editedReply.trim() || editedReply.length > 4096))) {
+    return res.status(400).json({ success: false, error: 'Invalid decision or reply' });
+  }
+  let claimed = false;
+  let sent = false;
   try {
-    const id = parseInt(req.params.id, 10);
-    const { action, editedReply } = req.body; // 'approve', 'edit', 'reject'
-
-    const [item] = await db.select().from(approvalQueue).where(eq(approvalQueue.id, id)).limit(1);
-    if (!item) {
-      return res.status(404).json({ success: false, error: 'Approval item not found' });
-    }
-
-    if (action === 'approve') {
-      await db.update(approvalQueue).set({
-        status: 'approved',
-        reviewedAt: new Date()
-      }).where(eq(approvalQueue.id, id));
-
-      await db.insert(auditLogs).values({
-        eventType: 'human_approved',
-        chatId: item.chatId,
-        actionTaken: 'Approved suggested reply for dispatch',
-        details: { reply: item.suggestedReply, confidence: item.aiConfidence }
-      });
-    } else if (action === 'edit') {
-      await db.update(approvalQueue).set({
-        status: 'edited',
-        editedReply: editedReply || item.suggestedReply,
-        reviewedAt: new Date()
-      }).where(eq(approvalQueue.id, id));
-
-      // Save edited reply into feedback exemplar memory!
-      if (editedReply && editedReply !== item.suggestedReply) {
-        await db.insert(knowledgeItems).values({
-          category: 'approved_reply',
-          questionOrTrigger: `User input requiring edit for chat ${item.chatId}`,
-          content: `AI Suggested: ${item.suggestedReply} | Human Corrected: ${editedReply}`,
-          tags: ['feedback_exemplar', 'human_edited']
-        });
-      }
-
-      await db.insert(auditLogs).values({
-        eventType: 'human_edited',
-        chatId: item.chatId,
-        actionTaken: 'Edited suggested reply for dispatch and saved feedback exemplar',
-        details: { original: item.suggestedReply, edited: editedReply }
-      });
-    } else if (action === 'reject') {
-      await db.update(approvalQueue).set({
-        status: 'rejected',
-        reviewedAt: new Date()
-      }).where(eq(approvalQueue.id, id));
-
-      await db.insert(auditLogs).values({
-        eventType: 'human_rejected',
-        chatId: item.chatId,
-        actionTaken: 'Rejected AI suggested reply',
-        details: { suggested: item.suggestedReply }
+    const [item] = await db.update(approvalQueue).set({ status: action === 'reject' ? 'rejected' : 'sending', reviewedAt: new Date() })
+      .where(and(eq(approvalQueue.id, id), inArray(approvalQueue.status, action === 'reject' ? ['pending', 'delivery_unknown'] : ['pending'])))
+      .returning();
+    if (!item) return res.status(409).json({ success: false, error: 'Item is missing or already being processed. Check delivery status before retrying.' });
+    claimed = true;
+    if (action !== 'reject') {
+      const text = action === 'edit' ? editedReply.trim() : item.suggestedReply;
+      if (!text.trim() || text.length > 4096) throw new Error('Compose a reply before approving this item');
+      await sendManagedReply(item.chatId, text, item.incomingMessageId);
+      sent = true;
+      await db.transaction(async tx => {
+        await tx.update(approvalQueue).set({ status: action === 'edit' ? 'edited' : 'approved', editedReply: action === 'edit' ? text : null }).where(eq(approvalQueue.id, id));
+        const pending = await tx.select({ id: approvalQueue.id }).from(approvalQueue).where(and(eq(approvalQueue.chatId, item.chatId), inArray(approvalQueue.status, ['pending', 'sending', 'delivery_unknown']))).limit(1);
+        await tx.update(conversations).set({ requiresHumanReview: pending.length > 0 }).where(eq(conversations.chatId, item.chatId));
+        if (action === 'edit' && text !== item.suggestedReply) {
+          const [incoming] = await tx.select().from(messages).where(and(eq(messages.chatId, item.chatId), eq(messages.telegramMessageId, item.incomingMessageId))).limit(1);
+          await tx.insert(knowledgeItems).values({ category: 'approved_reply', questionOrTrigger: incoming?.text || '', content: JSON.stringify({ originalAi: item.suggestedReply, approvedVersion: text }), tags: ['human_verified', 'few_shot_exemplar'] });
+        }
       });
     }
-
-    res.json({ success: true, message: `Approval ${id} resolved as ${action}` });
+    await db.insert(auditLogs).values({ eventType: `human_${action}`, chatId: item.chatId, actionTaken: action === 'reject' ? 'Reply rejected' : 'Reply delivered', details: { approvalId: id } })
+      .catch(() => console.warn('[Web] Decision completed, but audit write failed.'));
+    res.json({ success: true });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    if (claimed && action !== 'reject') {
+      await db.update(approvalQueue).set({ status: sent || error.deliveryUnknown ? 'delivery_unknown' : 'pending' }).where(eq(approvalQueue.id, id)).catch(() => {});
+    }
+    res.status(502).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/conversations/:chatId/send', async (req: Request, res: Response) => {
+  const { text } = req.body;
+  if (!/^-?\d+$/.test(req.params.chatId) || typeof text !== 'string' || !text.trim() || text.length > 4096) {
+    return res.status(400).json({ success: false, error: 'A valid chat and reply (up to 4096 characters) are required' });
+  }
+  let claimedIds: number[] = [];
+  let delivered = false;
+  try {
+    // Reserve existing drafts before sending so an approval click cannot race this reply.
+    claimedIds = await db.transaction(async tx => {
+      const open = await tx.select().from(approvalQueue).where(and(eq(approvalQueue.chatId, req.params.chatId), inArray(approvalQueue.status, ['pending', 'sending', 'delivery_unknown']))).for('update');
+      if (open.some(item => item.status !== 'pending')) throw new Error('A reply is in progress or unconfirmed. Check Telegram before sending again.');
+      const ids = open.map(item => item.id);
+      if (ids.length) await tx.update(approvalQueue).set({ status: 'sending' }).where(inArray(approvalQueue.id, ids));
+      return ids;
+    });
+    const id = await sendManagedReply(req.params.chatId, text.trim());
+    delivered = true;
+    await db.transaction(async tx => {
+      if (claimedIds.length) await tx.update(approvalQueue).set({ status: 'superseded', reviewedAt: new Date() }).where(inArray(approvalQueue.id, claimedIds));
+      const open = await tx.select({ id: approvalQueue.id }).from(approvalQueue).where(and(eq(approvalQueue.chatId, req.params.chatId), inArray(approvalQueue.status, ['pending', 'sending', 'delivery_unknown']))).limit(1);
+      await tx.update(conversations).set({ requiresHumanReview: open.length > 0 }).where(eq(conversations.chatId, req.params.chatId));
+    });
+    res.json({ success: true, messageId: id });
+  } catch (error: any) {
+    if (claimedIds.length) await db.update(approvalQueue).set({ status: delivered || error.deliveryUnknown ? 'delivery_unknown' : 'pending' }).where(inArray(approvalQueue.id, claimedIds)).catch(() => {});
+    res.status(502).json({ success: false, error: delivered ? 'Reply delivered but queue update failed. Check Telegram before retrying.' : error.message });
   }
 });
 
@@ -206,6 +216,8 @@ app.post('/api/settings', async (req: Request, res: Response) => {
       }
     };
 
+    if (operatingMode !== undefined && !['manual', 'draft', 'auto_pilot'].includes(operatingMode)) return res.status(400).json({ success: false, error: 'Invalid operating mode' });
+    if (emergencyKillSwitch !== undefined && typeof emergencyKillSwitch !== 'boolean') return res.status(400).json({ success: false, error: 'Kill switch must be boolean' });
     if (operatingMode) await upsertSetting('operating_mode', operatingMode);
     if (emergencyKillSwitch !== undefined) await upsertSetting('emergency_kill_switch', String(emergencyKillSwitch));
     if (allowedGroupIds !== undefined) await upsertSetting('allowed_group_ids', Array.isArray(allowedGroupIds) ? allowedGroupIds.join(',') : allowedGroupIds);
@@ -217,7 +229,7 @@ app.post('/api/settings', async (req: Request, res: Response) => {
       eventType: 'settings_updated',
       chatId: 'system',
       actionTaken: 'Updated panel operating mode, kill switch, or whitelist/blacklist settings',
-      details: req.body
+      details: { changed: Object.keys(req.body) }
     });
 
     res.json({ success: true, message: 'Settings saved successfully' });
@@ -228,15 +240,7 @@ app.post('/api/settings', async (req: Request, res: Response) => {
 
 
 // 6b. Secure Multi-Key Gemini Settings & Test
-function encryptGeminiKeys(plainJson: string): string {
-  const keyHex = (process.env.SESSION_ENCRYPTION_KEY || '').trim();
-  if (!keyHex) throw new Error('SESSION_ENCRYPTION_KEY is required to encrypt keys');
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(keyHex, 'hex'), iv);
-  const encrypted = Buffer.concat([cipher.update(plainJson, 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return `enc:${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
-}
+const encryptGeminiKeys = encryptSecret;
 
 function decryptGeminiKeys(stored: string): any[] {
   if (!stored) return [];
@@ -287,6 +291,8 @@ app.post('/api/gemini/settings', async (req: Request, res: Response) => {
       }
     };
 
+    if (providerMode !== undefined && !['auto', 'gemini', 'bedrock'].includes(providerMode)) return res.status(400).json({ success: false, error: 'Invalid provider mode' });
+    if (model !== undefined && (typeof model !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(model))) return res.status(400).json({ success: false, error: 'Invalid model' });
     if (providerMode) await upsertSetting('ai_provider_mode', providerMode);
     if (model) await upsertSetting('gemini_model', model);
 
@@ -351,18 +357,18 @@ app.post('/api/gemini/test', async (req: Request, res: Response) => {
     if (!testKey) return res.status(400).json({ success: false, error: 'Key is required' });
 
     const targetModel = model || 'gemini-2.5-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${testKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(targetModel)}:generateContent`;
     const testRes = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': testKey },
+      signal: AbortSignal.timeout(30_000),
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: 'Respond with OK' }] }]
       })
     });
 
     if (!testRes.ok) {
-      const errText = await testRes.text();
-      return res.status(testRes.status).json({ success: false, error: `Gemini API error (${testRes.status}): ${errText}` });
+      return res.status(testRes.status).json({ success: false, error: `Gemini API error (${testRes.status})` });
     }
 
     const data: any = await testRes.json();
@@ -421,91 +427,79 @@ app.get('/api/audit-logs', async (req: Request, res: Response) => {
 
 
 // ---------- In-panel Telegram MTProto login ----------
-const pendingLogins = new Map<string, { client: TelegramClient; phone: string; phoneCodeHash: string; createdAt: number }>();
+const pendingLogins = new PendingLogins();
 
-function cleanupPendingLogin(phone: string) {
-  const pending = pendingLogins.get(phone);
-  if (!pending) return;
-  try {
-    void pending.client.disconnect();
-  } catch {}
-  try {
-    void pending.client.destroy();
-  } catch {}
-  pendingLogins.delete(phone);
+let sessionEpoch = 0;
+let sessionChanges: Promise<unknown> = Promise.resolve();
+function changeSession<T>(operation: () => Promise<T>): Promise<T> {
+  const result = sessionChanges.then(operation);
+  sessionChanges = result.catch(() => {});
+  return result;
 }
 
-function cleanupExpiredPendingLogins() {
-  const now = Date.now();
-  for (const [phone, pending] of pendingLogins.entries()) {
-    if (now - pending.createdAt > 10 * 60 * 1000) {
-      try {
-        void pending.client.disconnect();
-      } catch {}
-      try {
-        void pending.client.destroy();
-      } catch {}
-      pendingLogins.delete(phone);
-    }
-  }
-}
-
-function getEncryptionKey(): Buffer | null {
-  const keyHex = (process.env.SESSION_ENCRYPTION_KEY || '').trim();
-  if (!keyHex) return null;
-  return Buffer.from(keyHex, 'hex');
-}
-
-function encryptSessionString(plain: string): string {
-  const key = getEncryptionKey();
-  if (!key) return plain; // stored unencrypted when SESSION_ENCRYPTION_KEY is not set
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
-  return ['enc', iv.toString('hex'), cipher.getAuthTag().toString('hex'), enc.toString('hex')].join(':');
-}
-
-async function saveActiveSession(phone: string, sessionString: string) {
-  const encrypted = encryptSessionString(sessionString);
-  await stopWorker();
-    await db.update(telegramSessions).set({ isActive: false, updatedAt: new Date() }).where(eq(telegramSessions.isActive, true));
-  await db.insert(telegramSessions).values({
-    userId: phone, phone, encryptedSessionString: encrypted, isActive: true,
-  }).onConflictDoUpdate({
-    target: telegramSessions.userId,
-    set: { phone, encryptedSessionString: encrypted, isActive: true, updatedAt: new Date() },
+async function saveActiveSession(phone: string, sessionString: string, epoch: number, userId: string) {
+  const encrypted = encryptSecret(sessionString);
+  return changeSession(async () => {
+    if (epoch !== sessionEpoch) throw new Error('Login cancelled by disconnect');
+    const [existingBinding] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'managed_account_id'));
+    if (existingBinding && existingBinding.value !== userId) throw new Error('This database belongs to a different Telegram account');
+    await stopWorker();
+    await db.transaction(async tx => {
+      await tx.insert(systemSettings).values({ key: 'managed_account_id', value: userId }).onConflictDoNothing({ target: systemSettings.key });
+      const [binding] = await tx.select().from(systemSettings).where(eq(systemSettings.key, 'managed_account_id'));
+      if (binding.value !== userId) throw new Error('This database belongs to a different Telegram account');
+      await tx.update(telegramSessions).set({ isActive: false, updatedAt: new Date() }).where(eq(telegramSessions.isActive, true));
+      await tx.insert(telegramSessions).values({ userId: phone, phone, encryptedSessionString: encrypted, isActive: true })
+        .onConflictDoUpdate({ target: telegramSessions.userId, set: { phone, encryptedSessionString: encrypted, isActive: true, updatedAt: new Date() } });
+    });
+    if (epoch !== sessionEpoch) throw new Error('Login cancelled by disconnect');
+    await startWorker(sessionString);
   });
 }
 
 // Send login code to a Telegram phone number
 app.post('/api/auth/send-code', async (req: Request, res: Response) => {
-  const phone = (req.body?.phone || '').trim();
+  const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
+  if (!phone) return res.status(400).json({ success: false, error: 'phone is required' });
+  const epoch = sessionEpoch;
+  const release = pendingLogins.acquire(phone);
+  if (!release) return res.status(409).json({ success: false, error: 'A login request is already in progress for this phone.' });
+  let client: TelegramClient | undefined;
   try {
-    if (!phone) return res.status(400).json({ success: false, error: 'phone is required' });
+    encryptionKey();
     const apiId = parseInt(process.env.TELEGRAM_API_ID || '', 10);
     const apiHash = process.env.TELEGRAM_API_HASH || '';
     if (!apiId || !apiHash) {
       return res.status(500).json({ success: false, error: 'TELEGRAM_API_ID / TELEGRAM_API_HASH are not configured on the web task' });
     }
     // Drop any previous pending login for this phone
-    cleanupPendingLogin(phone);
+    await pendingLogins.cleanup(phone);
 
-    const client = new TelegramClient(new StringSession(''), apiId, apiHash, { connectionRetries: 5 });
+    client = new TelegramClient(new StringSession(''), apiId, apiHash, { connectionRetries: 5 });
     await client.connect();
     const result = await client.sendCode({ apiId, apiHash }, phone);
+    if (epoch !== sessionEpoch) throw new Error('Login cancelled by disconnect');
     pendingLogins.set(phone, { client, phone, phoneCodeHash: (result as any).phoneCodeHash, createdAt: Date.now() });
+    client = undefined; // Ownership transferred to the pending login store.
     res.json({ success: true, message: 'Login code sent to your Telegram app' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.errorMessage || error.message });
+  } finally {
+    if (client) await disposeLoginClient(client);
+    release();
   }
 });
 
 // Verify the login code; responds requiresPassword:true when 2FA is enabled
 app.post('/api/auth/verify-code', async (req: Request, res: Response) => {
-  const phone = (req.body?.phone || '').trim();
-  const code = (req.body?.code || '').trim();
-  const pending = pendingLogins.get(phone);
+  const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  if (!phone) return res.status(400).json({ success: false, error: 'phone is required' });
+  const epoch = sessionEpoch;
+  const release = pendingLogins.acquire(phone);
+  if (!release) return res.status(409).json({ success: false, error: 'A login request is already in progress for this phone.' });
   try {
+    const pending = await pendingLogins.get(phone);
     if (!pending) return res.status(400).json({ success: false, error: 'No login in progress for this phone. Request a new code.' });
     await pending.client.invoke(new Api.auth.SignIn({
       phoneNumber: phone,
@@ -513,56 +507,55 @@ app.post('/api/auth/verify-code', async (req: Request, res: Response) => {
       phoneCode: code,
     }));
     const sessionString = (pending.client.session as StringSession).save() as unknown as string;
-    await saveActiveSession(phone, sessionString);
-    try {
-      await pending.client.disconnect();
-      await pending.client.destroy();
-    } catch {}
-    pendingLogins.delete(phone);
-    setTimeout(() => {
-      startWorker(sessionString).catch((err) => console.error('[Web] Failed to start co-located worker:', err));
-    }, 1500);
+    await saveActiveSession(phone, sessionString, epoch, (await pending.client.getMe()).id.toString());
+    await pendingLogins.cleanup(phone);
+
     res.json({ success: true, requiresPassword: false, message: 'Telegram connected' });
   } catch (error: any) {
     if (error.errorMessage === 'SESSION_PASSWORD_NEEDED') {
       return res.json({ success: true, requiresPassword: true });
     }
     res.status(400).json({ success: false, error: error.errorMessage || error.message });
+  } finally {
+    release();
   }
 });
 
 // Submit the 2FA cloud password (only needed when verify-code asked for it)
 app.post('/api/auth/submit-password', async (req: Request, res: Response) => {
-  const phone = (req.body?.phone || '').trim();
+  const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
   const password = req.body?.password || '';
-  const pending = pendingLogins.get(phone);
+  if (!phone) return res.status(400).json({ success: false, error: 'phone is required' });
+  const epoch = sessionEpoch;
+  const release = pendingLogins.acquire(phone);
+  if (!release) return res.status(409).json({ success: false, error: 'A login request is already in progress for this phone.' });
   try {
+    const pending = await pendingLogins.get(phone);
     if (!pending) return res.status(400).json({ success: false, error: 'No login in progress for this phone. Request a new code.' });
     const pwdInfo = await pending.client.invoke(new Api.account.GetPassword());
     const srp = await computeCheck(pwdInfo, password);
     await pending.client.invoke(new Api.auth.CheckPassword({ password: srp }));
     const sessionString = (pending.client.session as StringSession).save() as unknown as string;
-    await saveActiveSession(phone, sessionString);
-    try {
-      await pending.client.disconnect();
-      await pending.client.destroy();
-    } catch {}
-    pendingLogins.delete(phone);
-    setTimeout(() => {
-      startWorker(sessionString).catch((err) => console.error('[Web] Failed to start co-located worker:', err));
-    }, 1500);
+    await saveActiveSession(phone, sessionString, epoch, (await pending.client.getMe()).id.toString());
+    await pendingLogins.cleanup(phone);
+
     res.json({ success: true, message: 'Telegram connected with 2FA' });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.errorMessage || error.message });
+  } finally {
+    release();
   }
 });
 
 // 9. Session Disconnect / Logout
 
 app.post('/api/auth/disconnect', async (req: Request, res: Response) => {
+  sessionEpoch++;
   try {
-    await stopWorker();
-    await db.update(telegramSessions).set({ isActive: false, updatedAt: new Date() }).where(eq(telegramSessions.isActive, true));
+    await changeSession(async () => {
+      await stopWorker();
+      await db.update(telegramSessions).set({ isActive: false, updatedAt: new Date() }).where(eq(telegramSessions.isActive, true));
+    });
     await db.insert(auditLogs).values({
       eventType: 'session_disconnected',
       chatId: 'system',
@@ -580,7 +573,9 @@ initDb()
   .then(() => {
     app.listen(port, () => {
       console.log(`Telegram AI Management Panel listening at http://localhost:${port}`);
-      setInterval(cleanupExpiredPendingLogins, 60_000);
+      setInterval(() => {
+        void pendingLogins.cleanupExpired().catch(() => console.warn('[Web] Login cleanup failed.'));
+      }, 60_000).unref();
       // Boot co-located worker inside web process
       startWorker().catch((err) => console.error('[Web] Error booting worker:', err));
     });

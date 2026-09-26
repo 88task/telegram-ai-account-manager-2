@@ -14,7 +14,9 @@
     "db:studio": "pnpm --filter @telegram-ai/db studio",
     "web:dev": "pnpm --filter @telegram-ai/web dev",
     "web:start": "pnpm --filter @telegram-ai/web start",
-    "web:build": "pnpm --filter @telegram-ai/web build"
+    "web:build": "pnpm --filter @telegram-ai/web build",
+    "test": "pnpm build && node --test tests/*.test.cjs tests/*.test.mjs",
+    "test:integration": "pnpm build && node --test tests/integration/*.test.cjs"
   },
   "devDependencies": {
     "turbo": "^2.0.0",

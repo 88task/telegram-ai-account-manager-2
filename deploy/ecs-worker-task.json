@@ -1,7 +1,9 @@
 {
   "family": "telegram-ai-worker",
   "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
   "cpu": "512",
   "memory": "1024",
   "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole",
@@ -12,14 +14,36 @@
       "image": "<ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/telegram-ai-worker:latest",
       "essential": true,
       "environment": [
-        { "name": "NODE_ENV", "value": "production" },
-        { "name": "AWS_REGION", "value": "ap-south-1" },
-        { "name": "OPERATING_MODE", "value": "auto_pilot" }
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        },
+        {
+          "name": "AWS_REGION",
+          "value": "ap-south-1"
+        },
+        {
+          "name": "DEFAULT_OPERATING_MODE",
+          "value": "draft"
+        }
       ],
       "secrets": [
-        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/DATABASE_URL" },
-        { "name": "TELEGRAM_API_ID", "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/TELEGRAM_API_ID" },
-        { "name": "TELEGRAM_API_HASH", "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/TELEGRAM_API_HASH" }
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/DATABASE_URL"
+        },
+        {
+          "name": "TELEGRAM_API_ID",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/TELEGRAM_API_ID"
+        },
+        {
+          "name": "TELEGRAM_API_HASH",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/TELEGRAM_API_HASH"
+        },
+        {
+          "name": "SESSION_ENCRYPTION_KEY",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/SESSION_ENCRYPTION_KEY"
+        }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",

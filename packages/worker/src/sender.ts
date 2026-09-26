@@ -1,4 +1,4 @@
-import { TelegramClient } from 'telegram';
+import { TelegramClient, utils } from 'telegram';
 import { Api } from 'telegram/tl/index.js';
 
 export class TelegramSender {
@@ -9,25 +9,24 @@ export class TelegramSender {
    * Quotes the message and mentions the user in group chats.
    * target can be a GramJS Message object, InputPeer, or string chat_id.
    */
-  public async sendReply(target: any, text: string): Promise<number | undefined> {
+  public async sendReply(target: any, text: string, beforeSend?: () => Promise<void>): Promise<number | undefined> {
     try {
       let peer: any = target;
 
-      const getChatIdValue = (obj: any): string => {
-        const candidates = [obj?.chatId, obj?.chat?.id, obj?.peerId, obj?.id, obj?.senderId];
-        for (const value of candidates) {
-          if (value === null || value === undefined || value === '') continue;
-          const str = typeof value === 'string' ? value : String(value);
-          const normalized = str.replace(/[^0-9-]/g, '');
-          if (normalized) return normalized;
+      // GramJS marks user IDs positive and group/channel IDs negative. A
+      // message's own id and senderId do not identify the destination chat.
+      let targetChatId = '';
+      for (const candidate of [target?.chatId, target?.peerId, target?.chat, target]) {
+        if (candidate === null || candidate === undefined) continue;
+        try {
+          targetChatId = utils.getPeerId(candidate);
+          if (targetChatId) break;
+        } catch {
+          // Unresolved peers can still use the message's chat-kind flags below.
         }
-        return '';
-      };
-
-      const targetChatId = getChatIdValue(target);
-      const numericChatId = targetChatId ? Number(targetChatId) : NaN;
-      const isPrivateChat = !!targetChatId && Number.isFinite(numericChatId) && numericChatId > 0;
-      const isGroupLikeChat = !!targetChatId && Number.isFinite(numericChatId) && numericChatId < 0;
+      }
+      const isPrivateChat = /^[1-9]\d*$/.test(targetChatId);
+      const isGroupLikeChat = /^-[1-9]\d*$/.test(targetChatId);
 
       // If target is a GramJS Message object with async getInputChat()
       if (target && typeof target.getInputChat === 'function') {
@@ -94,13 +93,16 @@ export class TelegramSender {
 
       // 2. Direct Quote Reply: quotes the specific user message
       if (target && typeof target.reply === 'function') {
+        await beforeSend?.();
         try {
           const result = await target.reply({
             message: messageText,
           });
           return result?.id;
         } catch (replyErr) {
-          console.warn('[TelegramSender] target.reply failed, falling back to client.sendMessage:', replyErr);
+          // A network failure can occur after Telegram accepted the message.
+          // Never issue a second send when delivery is uncertain.
+          throw replyErr;
         }
       }
 
@@ -112,10 +114,11 @@ export class TelegramSender {
         sendOptions.replyTo = target.id;
       }
 
+      await beforeSend?.();
       const result = await this.client.sendMessage(peer, sendOptions);
       return result?.id;
     } catch (err) {
-      console.error(`Failed to send message:`, err);
+      console.error('[TelegramSender] Delivery failed or could not be confirmed.');
       throw err;
     }
   }

@@ -80,23 +80,29 @@ cp .env.example .env
 pnpm db:push
 ```
 
-### 4. Authenticate Telegram MTProto Account
+### 4. Build the Application
 ```bash
-pnpm worker:auth
-# Prompts for phone number, OTP received on Telegram, and 2FA password if enabled
+pnpm build
 ```
 
-### 5. Start the Background Worker
+### 5. Choose One Runtime per Database
+
+**Dashboard (recommended):** the web server embeds the Telegram worker. Configure
+panel authentication and encryption as described below, then log in to Telegram
+from the dashboard.
 ```bash
+pnpm web:start
+# Access the dashboard at http://localhost:3000 (HTTPS proxy in production)
+```
+
+**Headless alternative:** authenticate from the CLI, then start only the standalone
+worker. Do not run this alongside the web server against the same database.
+```bash
+pnpm worker:auth
+# Prompts for phone number, Telegram OTP, and 2FA password if enabled
 pnpm worker:start
 ```
 
-
-### 6. Launch the AI Management Panel Web Dashboard
-```bash
-pnpm web:dev
-# Access the dashboard at http://localhost:3000
-```
 **Dashboard Capabilities:**
 - **Emergency Kill Switch:** Instant halt button to kill all automated Telegram replies.
 - **Operating Mode Switch:** Toggle between Manual, Draft, and Auto-Pilot on the fly.
@@ -105,3 +111,66 @@ pnpm web:dev
 - **Conversation Triage:** Real-time visibility into unanswered messages, reply necessity, and chat history.
 - **LUMO Knowledge & Feedback Memory:** Stored safety rules, 24 supported Indian banks, and few-shot exemplars.
 - **Audit Logs:** Full traceability for every AI perception, model evaluation, and human action.
+
+## Regression checks
+
+```bash
+pnpm test
+# Use a disposable PostgreSQL database with TLS enabled. Tests create and remove
+# their own random schemas; no Telegram or model-provider traffic is sent.
+TEST_DATABASE_URL='postgresql://user:password@localhost:5432/telegram_test' pnpm test:integration
+```
+
+The unit suite covers triage, scope/dispatch boundaries, Telegram reply targeting,
+and pending-login cleanup. Integration tests exercise schema upgrades and rollback,
+concurrent duplicate events, the worker/brain pipeline, HTTP APIs, and OTP/2FA
+lifecycle with synthetic provider stubs. Live Telegram transport, SRP authentication,
+and model output quality still need validation in a configured environment.
+
+Startup migrations retain the oldest message for each `(chat_id, telegram_message_id)`
+and preserve duplicate rows, including legacy columns, as JSON in
+`messages_duplicate_archive.original_row`. Back up the database before deployment;
+initial deduplication takes a table lock. The unique index is also declared in the
+Drizzle schema. `db:push` builds the database package and runs the same initialization/cleanup
+before applying the Drizzle schema, including on databases containing duplicates.
+
+
+### Required security and delivery configuration
+
+Set `PANEL_USERNAME` and a unique `PANEL_PASSWORD` of at least 16 characters before
+opening the dashboard. The panel and APIs use HTTP Basic authentication; expose
+only an HTTPS reverse proxy in production. Set `PANEL_ORIGIN` to the external
+origin if the proxy rewrites the Host header. `/healthz` is the unauthenticated health
+probe. Configure deployment probes to use that path.
+
+Set `SESSION_ENCRYPTION_KEY` to 64 hexadecimal characters (`openssl rand -hex 32`).
+Back up that key securely: changing it makes existing encrypted sessions and API
+keys unreadable. New credentials are never stored as plaintext. Legacy plaintext
+active sessions are encrypted when loaded. PostgreSQL TLS verifies certificates;
+use `DATABASE_SSL_CA` for a private CA (PEM with literal `\n` separators). The
+`DATABASE_SSL_REJECT_UNAUTHORIZED=false` option is for isolated local fixtures only.
+`db:push` accepts a standard PostgreSQL URL; non-TLS URL query parameters are
+rejected because Drizzle cannot preserve them through its TLS-capable credentials form.
+
+The default mode is `draft`. `DEFAULT_OPERATING_MODE` is preferred; the legacy
+`OPERATING_MODE` remains supported. Explicit empty group/block/admin lists override
+environment defaults. AI failures or failed critique checks require human review.
+The kill switch disables automatic, approved, and manually composed sends.
+
+Use one Telegram account per database, and run **one worker** per database. The web
+server already embeds a worker; do not run the standalone worker alongside it.
+The first authenticated Telegram ID binds the database to that account. Use a
+separate database to manage another account so history and approvals cannot cross
+accounts. Runtime worker/session transitions are serialized in each process.
+
+Approvals claim a pending item before delivery. Concurrent clicks cannot send the
+same item twice. `delivery_unknown` means Telegram delivery or subsequent storage
+could not be confirmed; inspect Telegram before resolving it. A process crash can
+leave `sending` items; reconcile those manually after checking the actual chat.
+External sends and SQL commits cannot be atomic, so automatic retries are avoided.
+
+
+The checked-in deployment workflow can restart all services in its ECS cluster.
+Review its deployment targets before using it. Scale any separately deployed worker
+for the same database to zero before using the embedded web worker; retain the
+standalone image for headless deployments.

@@ -2,15 +2,16 @@
 FROM node:20-alpine AS builder
 
 WORKDIR /app
-RUN npm install -g pnpm
+RUN npm install -g pnpm@9.15.0
 
-COPY package.json pnpm-workspace.yaml ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY tsconfig.json ./
 COPY packages/db/package.json packages/db/
 COPY packages/brain/package.json packages/brain/
 COPY packages/worker/package.json packages/worker/
+COPY packages/web/package.json packages/web/
 
-RUN pnpm install --no-frozen-lockfile --ignore-scripts
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 COPY packages/db packages/db
 COPY packages/brain packages/brain
@@ -23,14 +24,15 @@ RUN pnpm --filter @telegram-ai/worker build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-RUN npm install -g pnpm
+RUN npm install -g pnpm@9.15.0
 
-COPY package.json pnpm-workspace.yaml ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/db/package.json packages/db/
 COPY packages/brain/package.json packages/brain/
 COPY packages/worker/package.json packages/worker/
+COPY packages/web/package.json packages/web/
 
-RUN pnpm install --prod --no-frozen-lockfile --ignore-scripts
+RUN pnpm install --prod --frozen-lockfile --ignore-scripts
 
 COPY --from=builder /app/packages/db/dist packages/db/dist
 COPY --from=builder /app/packages/brain/dist packages/brain/dist

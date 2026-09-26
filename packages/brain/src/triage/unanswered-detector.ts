@@ -21,6 +21,18 @@ export class UnansweredDetector {
       };
     }
 
+    // A later outgoing message means this older/replayed inquiry was answered.
+    // Earlier outgoing history must never hide a fresh inbound message.
+    if (recentHistory.some(message => message.isOutgoing && message.timestamp > currentMessage.timestamp)) {
+      return {
+        replyRequired: false,
+        reason: 'A newer outgoing message already answered this inquiry.',
+        lastMessageByMe: true,
+        isConversationClosed: false,
+        urgency: 'low'
+      };
+    }
+
     const text = (currentMessage.text || '').trim().toLowerCase();
 
     // Polite conversation closers that do not require further follow-up

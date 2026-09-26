@@ -18,6 +18,7 @@ export type ScreenshotCategory =
 
 export interface ScreenshotTriageResult {
   category: ScreenshotCategory;
+  providerUnavailable?: boolean;
   isAmbiguous: boolean;
   extractedErrorText?: string;
   confidence: number;
@@ -94,11 +95,11 @@ OUTPUT FORMAT: Strict JSON only:
 }`;
 
     // If providerMode is 'gemini' and keys are configured, use Gemini directly
-    if (this.providerMode === 'gemini' && this.geminiPool.hasKeys()) {
+    if (this.providerMode === 'gemini') {
       try {
         return await this.triageWithGemini(prompt, imageBuffer, mimeType);
       } catch (gemErr: any) {
-        console.warn('Gemini primary vision triage failed, attempting Bedrock fallback:', gemErr.message);
+        return { providerUnavailable: true, category: 'ambiguous_unclear', isAmbiguous: true, confidence: 0, identifiedIssue: 'Gemini vision unavailable', suggestedAction: 'Human review required' };
       }
     }
 
@@ -125,7 +126,7 @@ OUTPUT FORMAT: Strict JSON only:
         }
       });
 
-      const response = await this.client.send(command);
+      const response = await this.client.send(command, { abortSignal: AbortSignal.timeout(30_000) });
       const text = response.output?.message?.content?.[0]?.text || '';
       const parsed = extractJsonObject(text);
 
@@ -146,27 +147,29 @@ OUTPUT FORMAT: Strict JSON only:
         category: 'ambiguous_unclear',
         isAmbiguous: true,
         confidence: 0.5,
+        providerUnavailable: true,
         identifiedIssue: 'Could not structure vision output',
         suggestedAction: 'Ask user for clarification',
         recommendedClarificationPrompt: 'Aapne jo photo bheji hai usme error clear nahi hai, please batayein screen par kya likha aa raha hai?'
       };
     } catch (err: any) {
-      console.error('Bedrock vision triage failed:', err);
+      console.warn('[AI] Bedrock vision unavailable.');
 
       // Fallback to Gemini when Bedrock fails
-      if (this.geminiPool.hasKeys()) {
+      if (this.providerMode === 'auto' && this.geminiPool.hasKeys()) {
         try {
           return await this.triageWithGemini(prompt, imageBuffer, mimeType);
         } catch (geminiErr: any) {
-          console.error('Gemini vision triage fallback failed:', geminiErr);
+          console.warn('[AI] Gemini vision unavailable.');
         }
       }
 
       return {
         category: 'ambiguous_unclear',
         isAmbiguous: true,
-        confidence: 0.3,
-        identifiedIssue: `Vision triage unavailable: ${err.message}`,
+        confidence: 0,
+        providerUnavailable: true,
+        identifiedIssue: 'Vision triage unavailable',
         suggestedAction: 'Ask user for clarification',
         recommendedClarificationPrompt: 'Photo open nahi ho paayi, please batayein aapko kya dikkat aa rahi hai?'
       };
@@ -205,6 +208,7 @@ OUTPUT FORMAT: Strict JSON only:
       category: 'ambiguous_unclear',
       isAmbiguous: true,
       confidence: 0.5,
+      providerUnavailable: true,
       identifiedIssue: 'Could not structure Gemini vision output',
       suggestedAction: 'Ask user for clarification',
       recommendedClarificationPrompt: 'Aapne jo photo bheji hai usme error clear nahi hai, please batayein screen par kya likha aa raha hai?'

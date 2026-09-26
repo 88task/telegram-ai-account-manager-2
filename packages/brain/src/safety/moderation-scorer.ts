@@ -1,3 +1,4 @@
+import { db, moderationStates, eq } from '@telegram-ai/db';
 import { TelegramIncomingMessage } from '../types.js';
 
 export interface UserModerationState {
@@ -21,7 +22,7 @@ export interface ModerationEvaluation {
 }
 
 export class ModerationScorer {
-  // In-memory state cache (backed by RDS in production)
+  // Per-chat runtime cache; bounded history avoids retaining full message bodies.
   private userStates: Map<string, UserModerationState> = new Map();
 
   // Keyword rules with weighted severity
@@ -45,7 +46,7 @@ export class ModerationScorer {
   ];
 
   private getOrCreateState(userId: string, chatId: string): UserModerationState {
-    let state = this.userStates.get(userId);
+    let state = this.userStates.get(`${chatId}:${userId}`);
     if (!state) {
       state = {
         userId,
@@ -57,7 +58,7 @@ export class ModerationScorer {
         isFlaggedForRemoval: false,
         history: []
       };
-      this.userStates.set(userId, state);
+      this.userStates.set(`${chatId}:${userId}`, state);
     }
     return state;
   }
@@ -67,6 +68,21 @@ export class ModerationScorer {
    * Safety invariant: The AI NEVER removes a user autonomously.
    * Severe/repeat offenders are queued for Human Admin Approval.
    */
+  public async evaluatePersistent(message: TelegramIncomingMessage): Promise<ModerationEvaluation> {
+    const key = `${message.chatId}:${message.senderId}`;
+    return db.transaction(async tx => {
+      const initial = this.getOrCreateState(message.senderId, message.chatId);
+      await tx.insert(moderationStates).values({ key, state: initial }).onConflictDoNothing();
+      const [row] = await tx.select().from(moderationStates).where(eq(moderationStates.key, key)).for('update');
+      this.userStates.set(key, row.state as UserModerationState);
+      const result = this.evaluate(message);
+      const state = this.userStates.get(key)!;
+      this.userStates.delete(key);
+      await tx.update(moderationStates).set({ state }).where(eq(moderationStates.key, key));
+      return result;
+    });
+  }
+
   public evaluate(message: TelegramIncomingMessage): ModerationEvaluation {
     const text = (message.text || '').toLowerCase();
     const state = this.getOrCreateState(message.senderId, message.chatId);
@@ -117,12 +133,14 @@ export class ModerationScorer {
       state.strikeCount++;
       state.lastViolationAt = Date.now();
       state.history.push({
-        text: message.text || '',
+        text: '',
         score: riskScore,
         violations: detectedViolations,
         timestamp: Date.now()
       });
     }
+
+    state.history = state.history.slice(-50);
 
     // Determine Action & Human Routing
     let recommendedAction: ModerationEvaluation['recommendedAction'] = 'allow';
@@ -154,14 +172,17 @@ export class ModerationScorer {
     };
   }
 
-  public getHistory(userId: string): UserModerationState | undefined {
-    return this.userStates.get(userId);
+  public getHistory(userId: string, chatId: string): UserModerationState | undefined {
+    return this.userStates.get(`${chatId}:${userId}`);
   }
 
-  public resetStrikes(userId: string): void {
-    const s = this.userStates.get(userId);
+  public resetStrikes(userId: string, chatId: string): void {
+    const s = this.userStates.get(`${chatId}:${userId}`);
     if (s) {
       s.strikeCount = 0;
+      s.scamAccusationCount = 0;
+      s.abusiveMessageCount = 0;
+      s.history = [];
       s.isFlaggedForRemoval = false;
     }
   }
