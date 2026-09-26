@@ -391,6 +391,17 @@ app.post('/api/knowledge', async (req: Request, res: Response) => {
   }
 });
 
+app.delete('/api/knowledge/:id', async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ success: false, error: 'Invalid knowledge ID' });
+    await db.delete(knowledgeItems).where(eq(knowledgeItems.id, id));
+    res.json({ success: true, message: 'Knowledge item deleted' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // 8. Audit Logs Stream
 app.get('/api/audit-logs', async (req: Request, res: Response) => {
   try {
