@@ -1,4 +1,4 @@
-import { TelegramClient } from 'telegram';
+import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { NewMessage } from 'telegram/events/index.js';
 import { BrainPipeline, OperatingMode } from '@telegram-ai/brain';
@@ -100,6 +100,73 @@ async function getLiveSettings() {
   }
 }
 
+
+
+interface AdminCacheEntry {
+  adminIds: Set<string>;
+  expiresAt: number;
+}
+const groupAdminCache = new Map<string, AdminCacheEntry>();
+
+async function isSenderAdminInChat(
+  client: TelegramClient,
+  msg: any,
+  chatId: string,
+  senderId: string
+): Promise<boolean> {
+  if (!chatId || !senderId) return false;
+
+  // In Telegram supergroups, an admin posting anonymously has senderId === chatId
+  if (senderId === chatId) {
+    return true;
+  }
+
+  const now = Date.now();
+  const cached = groupAdminCache.get(chatId);
+  if (cached && cached.expiresAt > now) {
+    return cached.adminIds.has(senderId);
+  }
+
+  const adminIds = new Set<string>();
+
+  try {
+    const inputChat = await msg.getInputChat();
+    if (inputChat) {
+      const admins = await client.getParticipants(inputChat, {
+        filter: new Api.ChannelParticipantsAdmins(),
+      });
+      if (Array.isArray(admins)) {
+        for (const admin of admins) {
+          if (admin?.id) {
+            adminIds.add(admin.id.toString());
+          }
+        }
+      }
+    }
+  } catch (err: any) {
+    try {
+      const entity: any = await client.getEntity(msg.chatId);
+      if (entity?.className === 'Chat') {
+        const fullChat: any = await client.invoke(new Api.messages.GetFullChat({ chatId: entity.id }));
+        const participants = fullChat?.fullChat?.participants?.participants || [];
+        for (const p of participants) {
+          if (p.className === 'ChatParticipantAdmin' || p.className === 'ChatParticipantCreator') {
+            adminIds.add(p.userId.toString());
+          }
+        }
+      }
+    } catch (fallbackErr: any) {
+      console.warn(, fallbackErr.message);
+    }
+  }
+
+  groupAdminCache.set(chatId, {
+    adminIds,
+    expiresAt: now + 5 * 60 * 1000,
+  });
+
+  return adminIds.has(senderId);
+}
 
 let activeClient: TelegramClient | null = null;
 let isStarting = false;
@@ -240,6 +307,18 @@ export async function startWorker(forcedSession?: string) {
       }
     }
 
+    let isSenderAdmin = false;
+    if (!isPrivate) {
+      try {
+        isSenderAdmin = await isSenderAdminInChat(client, msg, chatId, senderId);
+        if (isSenderAdmin) {
+          console.log();
+        }
+      } catch (err: any) {
+        console.warn(, err.message);
+      }
+    }
+
     let decision: any;
     try {
       decision = await brain.processMessage(
@@ -250,6 +329,7 @@ export async function startWorker(forcedSession?: string) {
           isPrivateChat: !!isPrivate,
           isGroup: !!isGroup,
           isChannel: !!isChannel,
+          isSenderAdmin,
           text: msg.text,
           mediaBuffer,
           mediaMimeType,

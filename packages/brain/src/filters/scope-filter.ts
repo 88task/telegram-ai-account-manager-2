@@ -38,7 +38,16 @@ export class ScopeFilter {
       };
     }
 
-    // 2. Explicitly Allowed Groups / Supergroups in whitelist
+    // 2. Ignore group administrators in group chats
+    if (!msg.isPrivateChat && msg.isSenderAdmin) {
+      return {
+        allowed: false,
+        reason: 'Sender is a group administrator.',
+        chatType: 'group'
+      };
+    }
+
+    // 3. Explicitly Allowed Groups / Supergroups in whitelist
     if (this.allowedGroupIds.has(msg.chatId)) {
       return {
         allowed: true,
@@ -46,12 +55,12 @@ export class ScopeFilter {
       };
     }
 
-    // 3. One-to-one Private Chats (Allowed by default unless blocked)
+    // 4. One-to-one Private Chats (Allowed by default unless blocked)
     if (msg.isPrivateChat) {
       return { allowed: true, chatType: 'private' };
     }
 
-    // 4. Pure Broadcast channels (Never process unless explicitly whitelisted)
+    // 5. Pure Broadcast channels (Never process unless explicitly whitelisted)
     if (msg.isChannel && !msg.isGroup) {
       return {
         allowed: false,
@@ -60,7 +69,7 @@ export class ScopeFilter {
       };
     }
 
-    // 5. Unapproved Groups & Supergroups
+    // 6. Unapproved Groups & Supergroups
     if (msg.isGroup || msg.isChannel) {
       return {
         allowed: false,

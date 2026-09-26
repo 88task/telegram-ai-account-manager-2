@@ -9,6 +9,7 @@ export interface TelegramIncomingMessage {
   isPrivateChat: boolean;
   isGroup: boolean;
   isChannel: boolean;
+  isSenderAdmin?: boolean;
   text?: string;
   mediaBuffer?: Buffer;
   mediaMimeType?: string;
