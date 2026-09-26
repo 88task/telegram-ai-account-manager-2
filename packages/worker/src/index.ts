@@ -148,7 +148,7 @@ async function main() {
     // Check live settings from DB (Kill switch & Mode)
     const settings = await getLiveSettings();
     brain.updateScope(settings.allowedGroupIds, settings.blockedUserIds);
-    brain.setGeminiConfig(settings.geminiKeys, settings.geminiModel, settings.geminiMode);
+    brain.setGeminiConfig(settings.geminiKeys || [], settings.geminiModel, settings.geminiMode);
     if (settings.emergencyKillSwitch) {
       console.log(`[Kill Switch Active] Skipping AI reply for chat ${chatId}.`);
       return;
