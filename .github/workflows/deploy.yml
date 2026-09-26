@@ -2,7 +2,7 @@ name: Build and Deploy to AWS ECS
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
@@ -30,46 +30,75 @@ jobs:
 
       - name: Ensure ECR Repositories Exist
         run: |
-          aws ecr describe-repositories --repository-names telegram-ai-worker --region ${{ secrets.AWS_REGION || 'ap-south-1' }} ||             aws ecr create-repository --repository-name telegram-ai-worker --region ${{ secrets.AWS_REGION || 'ap-south-1' }}
+          aws ecr describe-repositories \
+            --repository-names telegram-ai-worker \
+            --region "${{ secrets.AWS_REGION || 'ap-south-1' }}" \
+            || aws ecr create-repository \
+              --repository-name telegram-ai-worker \
+              --region "${{ secrets.AWS_REGION || 'ap-south-1' }}"
 
-          aws ecr describe-repositories --repository-names telegram-ai-web --region ${{ secrets.AWS_REGION || 'ap-south-1' }} ||             aws ecr create-repository --repository-name telegram-ai-web --region ${{ secrets.AWS_REGION || 'ap-south-1' }}
+          aws ecr describe-repositories \
+            --repository-names telegram-ai-web \
+            --region "${{ secrets.AWS_REGION || 'ap-south-1' }}" \
+            || aws ecr create-repository \
+              --repository-name telegram-ai-web \
+              --region "${{ secrets.AWS_REGION || 'ap-south-1' }}"
 
       - name: Build, tag, and push Worker container to ECR
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -f Dockerfile.worker -t $REGISTRY/telegram-ai-worker:$IMAGE_TAG -t $REGISTRY/telegram-ai-worker:latest .
-          docker push $REGISTRY/telegram-ai-worker:$IMAGE_TAG
-          docker push $REGISTRY/telegram-ai-worker:latest
+          docker build \
+            -f Dockerfile.worker \
+            -t "$REGISTRY/telegram-ai-worker:$IMAGE_TAG" \
+            -t "$REGISTRY/telegram-ai-worker:latest" \
+            .
+
+          docker push "$REGISTRY/telegram-ai-worker:$IMAGE_TAG"
+          docker push "$REGISTRY/telegram-ai-worker:latest"
 
       - name: Build, tag, and push Web container to ECR
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -f Dockerfile.web -t $REGISTRY/telegram-ai-web:$IMAGE_TAG -t $REGISTRY/telegram-ai-web:latest .
-          docker push $REGISTRY/telegram-ai-web:$IMAGE_TAG
-          docker push $REGISTRY/telegram-ai-web:latest
+          docker build \
+            -f Dockerfile.web \
+            -t "$REGISTRY/telegram-ai-web:$IMAGE_TAG" \
+            -t "$REGISTRY/telegram-ai-web:latest" \
+            .
 
-      - name: Auto Force-Update All ECS Services
+          docker push "$REGISTRY/telegram-ai-web:$IMAGE_TAG"
+          docker push "$REGISTRY/telegram-ai-web:latest"
+
+      # The web task embeds the worker.
+      # Only the configured application service is restarted.
+      - name: Deploy configured web service
         env:
           CLUSTER: ${{ secrets.ECS_CLUSTER || 'telegram-ai-cluster' }}
           REGION: ${{ secrets.AWS_REGION || 'ap-south-1' }}
+          SERVICE: ${{ vars.ECS_WEB_SERVICE || secrets.ECS_WEB_SERVICE }}
         run: |
-          echo "Discovering all ECS services in cluster $CLUSTER ($REGION)..."
-          SERVICES=$(aws ecs list-services --cluster "$CLUSTER" --region "$REGION" --query "serviceArns[]" --output text 2>/dev/null || true)
-          
-          if [ -n "$SERVICES" ]; then
-            for svc in $SERVICES; do
-              svc_name=$(echo "$svc" | awk -F'/' '{print $NF}')
-              echo "Triggering force-new-deployment for service: $svc_name"
-              aws ecs update-service --cluster "$CLUSTER" --service "$svc_name" --force-new-deployment --region "$REGION" || echo "Could not update $svc_name"
-            done
-          else
-            echo "No services returned by list-services, trying known service names..."
-            for known_svc in stable-server-web vivid-service-woker telegram-web-service telegram-worker-service; do
-              echo "Attempting update on $known_svc..."
-              aws ecs update-service --cluster "$CLUSTER" --service "$known_svc" --force-new-deployment --region "$REGION" || echo "$known_svc not found, skipping."
-            done
-          fi
+          set -euo pipefail
+
+          : "${SERVICE:?Configure ECS_WEB_SERVICE with the web service name or ARN}"
+
+          echo "Deploying ECS service: $SERVICE"
+          echo "Cluster: $CLUSTER"
+          echo "Region: $REGION"
+
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --force-new-deployment \
+            --region "$REGION"
+
+          echo "Waiting for ECS service to become stable..."
+
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
+            --region "$REGION"
+
+          echo "ECS deployment completed successfully."
