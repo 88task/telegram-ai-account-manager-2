@@ -4,7 +4,104 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Telegram AI Account Manager</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.tailwindcss.com">
+    // Gemini Settings & Multi-Key Pool
+    async function loadGeminiSettings() {
+      try {
+        const res = await fetch('/api/gemini/settings');
+        const json = await res.json();
+        if (json.success) {
+          const { providerMode, model, keys } = json.data;
+          document.getElementById('gemini-provider-mode').value = providerMode || 'auto';
+          document.getElementById('gemini-model-select').value = model || 'gemini-2.5-flash';
+
+          const badge = document.getElementById('gemini-status-badge');
+          if (keys && keys.length > 0) {
+            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700';
+            badge.innerText = `${keys.length} Active Key${keys.length > 1 ? 's' : ''}`;
+          } else {
+            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700';
+            badge.innerText = 'No Keys Configured';
+          }
+
+          const container = document.getElementById('gemini-keys-list');
+          if (!keys || keys.length === 0) {
+            container.innerHTML = '<div class="text-xs text-slate-400 italic py-2">No Gemini API keys configured yet. Add one below.</div>';
+          } else {
+            container.innerHTML = keys.map(k => `
+              <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                <div class="flex items-center gap-3">
+                  <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                  <div>
+                    <div class="text-sm font-semibold text-slate-800">${k.label}</div>
+                    <div class="text-xs font-mono text-slate-500">${k.maskedKey}</div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button onclick="deleteGeminiKey('${k.id}')" class="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1">Delete</button>
+                </div>
+              </div>
+            `).join('');
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load Gemini settings:', e);
+      }
+    }
+
+    async function addGeminiKey() {
+      const label = document.getElementById('gemini-key-label').value.trim();
+      const key = document.getElementById('gemini-new-key').value.trim();
+      if (!key) return alert('Please enter a Gemini API Key');
+
+      try {
+        const res = await fetch('/api/gemini/keys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label, key })
+        });
+        const json = await res.json();
+        if (json.success) {
+          document.getElementById('gemini-new-key').value = '';
+          document.getElementById('gemini-key-label').value = '';
+          await saveGeminiProviderSettings();
+          await loadGeminiSettings();
+        } else {
+          alert('Error: ' + json.error);
+        }
+      } catch (e) {
+        alert('Failed to add key: ' + e.message);
+      }
+    }
+
+    async function deleteGeminiKey(id) {
+      if (!confirm('Are you sure you want to remove this Gemini API key from the pool?')) return;
+      try {
+        await fetch(`/api/gemini/keys/${id}`, { method: 'DELETE' });
+        await loadGeminiSettings();
+      } catch (e) {
+        alert('Failed to delete key: ' + e.message);
+      }
+    }
+
+    async function saveGeminiProviderSettings() {
+      const providerMode = document.getElementById('gemini-provider-mode').value;
+      const model = document.getElementById('gemini-model-select').value;
+      try {
+        await fetch('/api/gemini/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ providerMode, model })
+        });
+      } catch (e) {
+        console.warn('Failed to save provider mode/model:', e);
+      }
+    }
+
+    document.getElementById('gemini-provider-mode')?.addEventListener('change', saveGeminiProviderSettings);
+    document.getElementById('gemini-model-select')?.addEventListener('change', saveGeminiProviderSettings);
+
+</script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script>
     tailwind.config = {
@@ -25,7 +122,104 @@
         }
       }
     }
-  </script>
+  
+    // Gemini Settings & Multi-Key Pool
+    async function loadGeminiSettings() {
+      try {
+        const res = await fetch('/api/gemini/settings');
+        const json = await res.json();
+        if (json.success) {
+          const { providerMode, model, keys } = json.data;
+          document.getElementById('gemini-provider-mode').value = providerMode || 'auto';
+          document.getElementById('gemini-model-select').value = model || 'gemini-2.5-flash';
+
+          const badge = document.getElementById('gemini-status-badge');
+          if (keys && keys.length > 0) {
+            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700';
+            badge.innerText = `${keys.length} Active Key${keys.length > 1 ? 's' : ''}`;
+          } else {
+            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700';
+            badge.innerText = 'No Keys Configured';
+          }
+
+          const container = document.getElementById('gemini-keys-list');
+          if (!keys || keys.length === 0) {
+            container.innerHTML = '<div class="text-xs text-slate-400 italic py-2">No Gemini API keys configured yet. Add one below.</div>';
+          } else {
+            container.innerHTML = keys.map(k => `
+              <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                <div class="flex items-center gap-3">
+                  <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                  <div>
+                    <div class="text-sm font-semibold text-slate-800">${k.label}</div>
+                    <div class="text-xs font-mono text-slate-500">${k.maskedKey}</div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button onclick="deleteGeminiKey('${k.id}')" class="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1">Delete</button>
+                </div>
+              </div>
+            `).join('');
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load Gemini settings:', e);
+      }
+    }
+
+    async function addGeminiKey() {
+      const label = document.getElementById('gemini-key-label').value.trim();
+      const key = document.getElementById('gemini-new-key').value.trim();
+      if (!key) return alert('Please enter a Gemini API Key');
+
+      try {
+        const res = await fetch('/api/gemini/keys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label, key })
+        });
+        const json = await res.json();
+        if (json.success) {
+          document.getElementById('gemini-new-key').value = '';
+          document.getElementById('gemini-key-label').value = '';
+          await saveGeminiProviderSettings();
+          await loadGeminiSettings();
+        } else {
+          alert('Error: ' + json.error);
+        }
+      } catch (e) {
+        alert('Failed to add key: ' + e.message);
+      }
+    }
+
+    async function deleteGeminiKey(id) {
+      if (!confirm('Are you sure you want to remove this Gemini API key from the pool?')) return;
+      try {
+        await fetch(`/api/gemini/keys/${id}`, { method: 'DELETE' });
+        await loadGeminiSettings();
+      } catch (e) {
+        alert('Failed to delete key: ' + e.message);
+      }
+    }
+
+    async function saveGeminiProviderSettings() {
+      const providerMode = document.getElementById('gemini-provider-mode').value;
+      const model = document.getElementById('gemini-model-select').value;
+      try {
+        await fetch('/api/gemini/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ providerMode, model })
+        });
+      } catch (e) {
+        console.warn('Failed to save provider mode/model:', e);
+      }
+    }
+
+    document.getElementById('gemini-provider-mode')?.addEventListener('change', saveGeminiProviderSettings);
+    document.getElementById('gemini-model-select')?.addEventListener('change', saveGeminiProviderSettings);
+
+</script>
   <style>
     body { background-color: #0b0f19; color: #f3f4f6; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
     .glass-card { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
@@ -764,7 +958,104 @@
     // Init
     loadStats();
     setInterval(loadStats, 10000);
-  </script>
+  
+    // Gemini Settings & Multi-Key Pool
+    async function loadGeminiSettings() {
+      try {
+        const res = await fetch('/api/gemini/settings');
+        const json = await res.json();
+        if (json.success) {
+          const { providerMode, model, keys } = json.data;
+          document.getElementById('gemini-provider-mode').value = providerMode || 'auto';
+          document.getElementById('gemini-model-select').value = model || 'gemini-2.5-flash';
+
+          const badge = document.getElementById('gemini-status-badge');
+          if (keys && keys.length > 0) {
+            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700';
+            badge.innerText = `${keys.length} Active Key${keys.length > 1 ? 's' : ''}`;
+          } else {
+            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700';
+            badge.innerText = 'No Keys Configured';
+          }
+
+          const container = document.getElementById('gemini-keys-list');
+          if (!keys || keys.length === 0) {
+            container.innerHTML = '<div class="text-xs text-slate-400 italic py-2">No Gemini API keys configured yet. Add one below.</div>';
+          } else {
+            container.innerHTML = keys.map(k => `
+              <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                <div class="flex items-center gap-3">
+                  <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                  <div>
+                    <div class="text-sm font-semibold text-slate-800">${k.label}</div>
+                    <div class="text-xs font-mono text-slate-500">${k.maskedKey}</div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button onclick="deleteGeminiKey('${k.id}')" class="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1">Delete</button>
+                </div>
+              </div>
+            `).join('');
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load Gemini settings:', e);
+      }
+    }
+
+    async function addGeminiKey() {
+      const label = document.getElementById('gemini-key-label').value.trim();
+      const key = document.getElementById('gemini-new-key').value.trim();
+      if (!key) return alert('Please enter a Gemini API Key');
+
+      try {
+        const res = await fetch('/api/gemini/keys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label, key })
+        });
+        const json = await res.json();
+        if (json.success) {
+          document.getElementById('gemini-new-key').value = '';
+          document.getElementById('gemini-key-label').value = '';
+          await saveGeminiProviderSettings();
+          await loadGeminiSettings();
+        } else {
+          alert('Error: ' + json.error);
+        }
+      } catch (e) {
+        alert('Failed to add key: ' + e.message);
+      }
+    }
+
+    async function deleteGeminiKey(id) {
+      if (!confirm('Are you sure you want to remove this Gemini API key from the pool?')) return;
+      try {
+        await fetch(`/api/gemini/keys/${id}`, { method: 'DELETE' });
+        await loadGeminiSettings();
+      } catch (e) {
+        alert('Failed to delete key: ' + e.message);
+      }
+    }
+
+    async function saveGeminiProviderSettings() {
+      const providerMode = document.getElementById('gemini-provider-mode').value;
+      const model = document.getElementById('gemini-model-select').value;
+      try {
+        await fetch('/api/gemini/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ providerMode, model })
+        });
+      } catch (e) {
+        console.warn('Failed to save provider mode/model:', e);
+      }
+    }
+
+    document.getElementById('gemini-provider-mode')?.addEventListener('change', saveGeminiProviderSettings);
+    document.getElementById('gemini-model-select')?.addEventListener('change', saveGeminiProviderSettings);
+
+</script>
 
   <!-- Telegram Login Modal -->
   <div id="auth-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -854,7 +1145,104 @@
         } else { authStatus(j.error || 'Password check failed.', true); }
       } catch (e) { authStatus('Network error: ' + e.message, true); }
     }
-  </script>
+  
+    // Gemini Settings & Multi-Key Pool
+    async function loadGeminiSettings() {
+      try {
+        const res = await fetch('/api/gemini/settings');
+        const json = await res.json();
+        if (json.success) {
+          const { providerMode, model, keys } = json.data;
+          document.getElementById('gemini-provider-mode').value = providerMode || 'auto';
+          document.getElementById('gemini-model-select').value = model || 'gemini-2.5-flash';
+
+          const badge = document.getElementById('gemini-status-badge');
+          if (keys && keys.length > 0) {
+            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700';
+            badge.innerText = `${keys.length} Active Key${keys.length > 1 ? 's' : ''}`;
+          } else {
+            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700';
+            badge.innerText = 'No Keys Configured';
+          }
+
+          const container = document.getElementById('gemini-keys-list');
+          if (!keys || keys.length === 0) {
+            container.innerHTML = '<div class="text-xs text-slate-400 italic py-2">No Gemini API keys configured yet. Add one below.</div>';
+          } else {
+            container.innerHTML = keys.map(k => `
+              <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                <div class="flex items-center gap-3">
+                  <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                  <div>
+                    <div class="text-sm font-semibold text-slate-800">${k.label}</div>
+                    <div class="text-xs font-mono text-slate-500">${k.maskedKey}</div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button onclick="deleteGeminiKey('${k.id}')" class="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1">Delete</button>
+                </div>
+              </div>
+            `).join('');
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load Gemini settings:', e);
+      }
+    }
+
+    async function addGeminiKey() {
+      const label = document.getElementById('gemini-key-label').value.trim();
+      const key = document.getElementById('gemini-new-key').value.trim();
+      if (!key) return alert('Please enter a Gemini API Key');
+
+      try {
+        const res = await fetch('/api/gemini/keys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label, key })
+        });
+        const json = await res.json();
+        if (json.success) {
+          document.getElementById('gemini-new-key').value = '';
+          document.getElementById('gemini-key-label').value = '';
+          await saveGeminiProviderSettings();
+          await loadGeminiSettings();
+        } else {
+          alert('Error: ' + json.error);
+        }
+      } catch (e) {
+        alert('Failed to add key: ' + e.message);
+      }
+    }
+
+    async function deleteGeminiKey(id) {
+      if (!confirm('Are you sure you want to remove this Gemini API key from the pool?')) return;
+      try {
+        await fetch(`/api/gemini/keys/${id}`, { method: 'DELETE' });
+        await loadGeminiSettings();
+      } catch (e) {
+        alert('Failed to delete key: ' + e.message);
+      }
+    }
+
+    async function saveGeminiProviderSettings() {
+      const providerMode = document.getElementById('gemini-provider-mode').value;
+      const model = document.getElementById('gemini-model-select').value;
+      try {
+        await fetch('/api/gemini/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ providerMode, model })
+        });
+      } catch (e) {
+        console.warn('Failed to save provider mode/model:', e);
+      }
+    }
+
+    document.getElementById('gemini-provider-mode')?.addEventListener('change', saveGeminiProviderSettings);
+    document.getElementById('gemini-model-select')?.addEventListener('change', saveGeminiProviderSettings);
+
+</script>
 
 </body>
 </html>
