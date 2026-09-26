@@ -160,7 +160,7 @@ ${memory.approvedExamples.map(e => `Q: "${e.userMessage}"\nA: "${e.approvedReply
     if (this.providerMode === 'gemini' && this.geminiPool.hasKeys()) {
       try {
         return await this.geminiPool.generateContent({
-          systemInstruction,
+          systemInstruction: systemPrompt,
           prompt: `User message: "${message.text}"`,
           imageBuffer: message.mediaBuffer,
           imageMimeType: message.mediaMimeType,
@@ -178,7 +178,7 @@ ${memory.approvedExamples.map(e => `Q: "${e.userMessage}"\nA: "${e.approvedReply
       if (this.geminiPool.hasKeys()) {
         try {
           return await this.geminiPool.generateContent({
-            systemInstruction,
+            systemInstruction: systemPrompt,
             prompt: `User message: "${message.text}"`,
             imageBuffer: message.mediaBuffer,
             imageMimeType: message.mediaMimeType,
