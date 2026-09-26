@@ -20,13 +20,13 @@ export function defaultOperatingMode(): 'manual' | 'draft' | 'auto_pilot' {
 }
 
 
-/** Shared by runtime queries and Drizzle migrations so neither can bypass TLS. */
+/** Shared by runtime queries and migrations: encrypted transport without CA verification. */
 export function databaseConnectionOptions() {
   let connectionString = process.env.DATABASE_URL || '';
   if (connectionString) {
     try {
       const url = new URL(connectionString);
-      // node-postgres URL SSL options otherwise replace the explicit TLS policy.
+      // URL SSL options would otherwise replace our certificate-free connection settings.
       for (const key of ['ssl', 'sslmode', 'sslcert', 'sslkey', 'sslrootcert']) url.searchParams.delete(key);
       connectionString = url.toString();
     } catch { /* The database driver reports malformed connection strings. */ }
@@ -34,8 +34,9 @@ export function databaseConnectionOptions() {
   return {
     connectionString,
     ssl: {
-      rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false',
-      ...(process.env.DATABASE_SSL_CA ? { ca: process.env.DATABASE_SSL_CA.replace(/\\n/g, '\n') } : {}),
+      // Explicit deployment policy: no custom CA or certificate validation required.
+      // TLS still encrypts traffic, but does not authenticate the database server.
+      rejectUnauthorized: false,
     },
   };
 }

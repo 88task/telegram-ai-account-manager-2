@@ -146,9 +146,18 @@ probe. Configure deployment probes to use that path.
 Set `SESSION_ENCRYPTION_KEY` to 64 hexadecimal characters (`openssl rand -hex 32`).
 Back up that key securely: changing it makes existing encrypted sessions and API
 keys unreadable. New credentials are never stored as plaintext. Legacy plaintext
-active sessions are encrypted when loaded. PostgreSQL TLS verifies certificates;
-use `DATABASE_SSL_CA` for a private CA (PEM with literal `\n` separators). The
-`DATABASE_SSL_REJECT_UNAUTHORIZED=false` option is for isolated local fixtures only.
+active sessions are encrypted when loaded. PostgreSQL connections use TLS encryption
+without server certificate verification, for both the application and migrations.
+No custom CA is required. This permits connections to an untrusted server certificate;
+the database server's identity is not verified.
+
+`DATABASE_SSL_CA` and `DATABASE_SSL_REJECT_UNAUTHORIZED` are no longer read by the app.
+When deploying this version, remove both from the ECS container's `environment` and
+`secrets` entries. In particular, remove the SSM reference for `DATABASE_SSL_CA`:
+ECS tries to fetch referenced secrets before the app starts, even when the app does
+not use them. Keep the other application secrets, including `DATABASE_URL`.
+Register the updated task definition and deploy it with the rebuilt image.
+
 `db:push` accepts a standard PostgreSQL URL; non-TLS URL query parameters are
 rejected because Drizzle cannot preserve them through its TLS-capable credentials form.
 

@@ -8,7 +8,7 @@ const { openTestDatabase } = require('./helpers.cjs');
 function launch(env) {
   const child = fork(require.resolve('../../packages/web/dist/server.js'), [], {
     execArgv: ['--require', require.resolve('./telegram-fixture.cjs')],
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', NODE_ENV: 'test', DATABASE_SSL_REJECT_UNAUTHORIZED: 'false', PANEL_USERNAME: 'test', PANEL_PASSWORD: 'synthetic-test-password', ...env },
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, PORT: '0', NODE_ENV: 'test', PANEL_USERNAME: 'test', PANEL_PASSWORD: 'synthetic-test-password', ...env },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   let logs = '';

@@ -72,18 +72,24 @@ test('vision outages require review while genuinely unclear screenshots stay ign
   assert.equal((await brain.processMessage(image, [], 'auto_pilot')).action, 'ignored');
 });
 
-test('runtime and migrations share verified TLS; connection URL cannot override it', t => {
+test('runtime and migrations use encrypted connections without CA configuration', t => {
   const { databaseConnectionOptions } = require('../packages/db/dist/configuration.js');
   const keys = ['DATABASE_URL', 'DATABASE_SSL_CA', 'DATABASE_SSL_REJECT_UNAUTHORIZED'];
   const previous = keys.map(key => process.env[key]);
   t.after(() => keys.forEach((key, i) => previous[i] === undefined ? delete process.env[key] : process.env[key] = previous[i]));
-  process.env.DATABASE_URL = 'postgresql://local@localhost/test?ssl=0&sslmode=disable&sslrootcert=bad&sslcert=bad&sslkey=bad';
-  process.env.DATABASE_SSL_CA = 'first\\nsecond';
-  delete process.env.DATABASE_SSL_REJECT_UNAUTHORIZED;
-  const options = databaseConnectionOptions();
-  assert.equal(new URL(options.connectionString).search, '');
-  assert.equal(options.ssl.rejectUnauthorized, true);
-  assert.equal(options.ssl.ca, 'first\nsecond');
-  process.env.DATABASE_SSL_REJECT_UNAUTHORIZED = 'false';
-  assert.equal(databaseConnectionOptions().ssl.rejectUnauthorized, false);
+  for (const mode of ['require', 'verify-full', 'disable']) {
+    process.env.DATABASE_URL = `postgresql://local@localhost/test?ssl=0&sslmode=${mode}&sslrootcert=bad&sslcert=bad&sslkey=bad&application_name=tls-test`;
+    for (const legacyValue of [undefined, 'true', 'false']) {
+      if (legacyValue === undefined) {
+        delete process.env.DATABASE_SSL_CA;
+        delete process.env.DATABASE_SSL_REJECT_UNAUTHORIZED;
+      } else {
+        process.env.DATABASE_SSL_CA = 'arn:aws:ssm:ap-south-1:000000000000:parameter/synthetic-ca';
+        process.env.DATABASE_SSL_REJECT_UNAUTHORIZED = legacyValue;
+      }
+      const options = databaseConnectionOptions();
+      assert.equal(new URL(options.connectionString).search, '?application_name=tls-test');
+      assert.deepEqual(options.ssl, { rejectUnauthorized: false });
+    }
+  }
 });
