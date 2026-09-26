@@ -121,6 +121,9 @@ export async function initDb(): Promise<void> {
       ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMP DEFAULT NOW();
       ALTER TABLE conversations ADD COLUMN IF NOT EXISTS unanswered BOOLEAN DEFAULT false;
       ALTER TABLE conversations ADD COLUMN IF NOT EXISTS requires_human_review BOOLEAN DEFAULT false;
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS account_key TEXT DEFAULT 'default';
+      ALTER TABLE conversations ALTER COLUMN account_key DROP NOT NULL;
+      ALTER TABLE conversations ALTER COLUMN account_key SET DEFAULT 'default';
 
       ALTER TABLE contacts ADD COLUMN IF NOT EXISTS id SERIAL;
       ALTER TABLE contacts ADD COLUMN IF NOT EXISTS telegram_user_id TEXT;
