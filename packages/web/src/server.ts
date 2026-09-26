@@ -219,6 +219,153 @@ app.post('/api/settings', async (req: Request, res: Response) => {
   }
 });
 
+
+// 6b. Secure Multi-Key Gemini Settings & Test
+function encryptGeminiKeys(plainJson: string): string {
+  const keyHex = (process.env.SESSION_ENCRYPTION_KEY || '').trim();
+  if (!keyHex) throw new Error('SESSION_ENCRYPTION_KEY is required to encrypt keys');
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(keyHex, 'hex'), iv);
+  const encrypted = Buffer.concat([cipher.update(plainJson, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `enc:${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
+}
+
+function decryptGeminiKeys(stored: string): any[] {
+  if (!stored) return [];
+  if (!stored.startsWith('enc:')) {
+    try { return JSON.parse(stored); } catch { return []; }
+  }
+  const [, ivHex, tagHex, dataHex] = stored.split(':');
+  const keyHex = (process.env.SESSION_ENCRYPTION_KEY || '').trim();
+  if (!keyHex) return [];
+  const decipher = crypto.createDecipheriv('aes-256-gcm', Buffer.from(keyHex, 'hex'), Buffer.from(ivHex, 'hex'));
+  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+  const dec = Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
+  try { return JSON.parse(dec); } catch { return []; }
+}
+
+app.get('/api/gemini/settings', async (req: Request, res: Response) => {
+  try {
+    const rows = await db.select().from(systemSettings);
+    const map = new Map<string, string>();
+    for (const r of rows) map.set(r.key, r.value);
+
+    const providerMode = map.get('ai_provider_mode') || 'auto';
+    const model = map.get('gemini_model') || 'gemini-2.5-flash';
+    const rawKeys = decryptGeminiKeys(map.get('gemini_keys_encrypted') || '');
+
+    const maskedKeys = rawKeys.map((k, idx) => ({
+      id: k.id || `key_${idx}`,
+      label: k.label || `Key ${idx + 1}`,
+      maskedKey: k.key ? `${k.key.slice(0, 6)}...${k.key.slice(-4)}` : 'Invalid',
+      createdAt: k.createdAt || new Date().toISOString(),
+    }));
+
+    res.json({ success: true, data: { providerMode, model, keys: maskedKeys } });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/gemini/settings', async (req: Request, res: Response) => {
+  try {
+    const { providerMode, model } = req.body;
+    const upsertSetting = async (key: string, value: string) => {
+      const [existing] = await db.select().from(systemSettings).where(eq(systemSettings.key, key)).limit(1);
+      if (existing) {
+        await db.update(systemSettings).set({ value, updatedAt: new Date() }).where(eq(systemSettings.key, key));
+      } else {
+        await db.insert(systemSettings).values({ key, value });
+      }
+    };
+
+    if (providerMode) await upsertSetting('ai_provider_mode', providerMode);
+    if (model) await upsertSetting('gemini_model', model);
+
+    res.json({ success: true, message: 'Gemini settings updated' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/gemini/keys', async (req: Request, res: Response) => {
+  try {
+    const { key, label } = req.body;
+    if (!key || !key.trim()) {
+      return res.status(400).json({ success: false, error: 'API key is required' });
+    }
+
+    const [existing] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'gemini_keys_encrypted')).limit(1);
+    const keysList = existing ? decryptGeminiKeys(existing.value) : [];
+
+    const newKeyObj = {
+      id: `gem_${Date.now()}`,
+      key: key.trim(),
+      label: label?.trim() || `Key ${keysList.length + 1}`,
+      createdAt: new Date().toISOString()
+    };
+    keysList.push(newKeyObj);
+
+    const enc = encryptGeminiKeys(JSON.stringify(keysList));
+    if (existing) {
+      await db.update(systemSettings).set({ value: enc, updatedAt: new Date() }).where(eq(systemSettings.key, 'gemini_keys_encrypted'));
+    } else {
+      await db.insert(systemSettings).values({ key: 'gemini_keys_encrypted', value: enc });
+    }
+
+    res.json({ success: true, message: 'Gemini API key securely added to pool' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/gemini/keys/:id', async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id;
+    const [existing] = await db.select().from(systemSettings).where(eq(systemSettings.key, 'gemini_keys_encrypted')).limit(1);
+    if (!existing) return res.json({ success: true });
+
+    let keysList = decryptGeminiKeys(existing.value);
+    keysList = keysList.filter((k: any) => k.id !== id);
+
+    const enc = encryptGeminiKeys(JSON.stringify(keysList));
+    await db.update(systemSettings).set({ value: enc, updatedAt: new Date() }).where(eq(systemSettings.key, 'gemini_keys_encrypted'));
+    res.json({ success: true, message: 'Gemini API key removed from pool' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/gemini/test', async (req: Request, res: Response) => {
+  try {
+    const { key, model } = req.body;
+    const testKey = key;
+    if (!testKey) return res.status(400).json({ success: false, error: 'Key is required' });
+
+    const targetModel = model || 'gemini-2.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${testKey}`;
+    const testRes = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'Respond with OK' }] }]
+      })
+    });
+
+    if (!testRes.ok) {
+      const errText = await testRes.text();
+      return res.status(testRes.status).json({ success: false, error: `Gemini API error (${testRes.status}): ${errText}` });
+    }
+
+    const data: any = await testRes.json();
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'OK';
+    res.json({ success: true, message: 'Key verified successfully!', reply });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // 7. LUMO Knowledge & Safety Tips Management
 app.get('/api/knowledge', async (req: Request, res: Response) => {
   try {
