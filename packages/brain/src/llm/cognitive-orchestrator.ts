@@ -1,3 +1,4 @@
+import { GeminiClientPool } from '../generator/gemini-client.js';
 import { getBedrockClient } from '../generator/client-factory.js';
 import {
   BedrockRuntimeClient,
@@ -42,6 +43,13 @@ export class CognitiveOrchestrator {
   private client: BedrockRuntimeClient;
   private reasoningModelId: string; // Amazon Nova Pro for multimodal & complex critique
   private fastModelId: string;      // Amazon Nova Lite for rapid perception
+  private geminiPool: GeminiClientPool = new GeminiClientPool();
+  private providerMode: 'auto' | 'gemini' | 'bedrock' = 'auto';
+
+  public setGeminiConfig(keys: string[], model?: string, mode?: 'auto' | 'gemini' | 'bedrock') {
+    this.geminiPool.updateConfig(keys, model);
+    if (mode) this.providerMode = mode;
+  }
 
   constructor() {
     this.client = getBedrockClient();
@@ -82,8 +90,17 @@ OUTPUT STRICT JSON ONLY:
       const text = res.output?.message?.content?.[0]?.text || '';
       const match = text.match(/\{[\s\S]*\}/);
       if (match) return JSON.parse(match[0]);
-    } catch {
-      // Fallback if fast model is unavailable
+    } catch (bedrockErr: any) {
+      // Fallback to Gemini if fast Bedrock model fails
+      if (this.geminiPool.hasKeys()) {
+        try {
+          const geminiRes = await this.geminiPool.generateContent({ prompt });
+          const match = geminiRes.match(/\{[\s\S]*\}/);
+          if (match) return JSON.parse(match[0]);
+        } catch (gemErr) {
+          console.warn('[Gemini Perception Fallback Error]:', gemErr);
+        }
+      }
     }
 
     return {
@@ -139,11 +156,37 @@ ${memory.approvedExamples.map(e => `Q: "${e.userMessage}"\nA: "${e.approvedReply
       inferenceConfig: { temperature: 0.3, maxTokens: 512 }
     });
 
+    // If providerMode is 'gemini' and keys are configured, use Gemini directly
+    if (this.providerMode === 'gemini' && this.geminiPool.hasKeys()) {
+      try {
+        return await this.geminiPool.generateContent({
+          systemInstruction,
+          prompt: `User message: "${message.text}"`,
+          imageBuffer: message.mediaBuffer,
+          imageMimeType: message.mediaMimeType,
+        });
+      } catch (geminiErr: any) {
+        console.error('[Gemini Primary Synthesis Error]:', geminiErr);
+      }
+    }
+
     try {
       const res = await this.client.send(command);
       return res.output?.message?.content?.[0]?.text || '';
     } catch (err: any) {
-      console.error('Bedrock synthesizeDraft failed:', err);
+      console.warn('Bedrock synthesizeDraft failed, attempting Gemini fallback:', err.message);
+      if (this.geminiPool.hasKeys()) {
+        try {
+          return await this.geminiPool.generateContent({
+            systemInstruction,
+            prompt: `User message: "${message.text}"`,
+            imageBuffer: message.mediaBuffer,
+            imageMimeType: message.mediaMimeType,
+          });
+        } catch (geminiErr: any) {
+          console.error('[Gemini Fallback Synthesis Error]:', geminiErr);
+        }
+      }
       return this.generateKnowledgeFallback(message.text || '', perception.detectedDialect);
     }
   }
