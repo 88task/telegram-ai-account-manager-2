@@ -54,6 +54,9 @@ async function getLiveSettings() {
       emergencyKillSwitch: false,
       allowedGroupIds: (process.env.ALLOWED_GROUP_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
       blockedUserIds: (process.env.BLOCKED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
+      geminiKeys: [] as string[],
+      geminiModel: 'gemini-2.5-flash',
+      geminiMode: 'auto' as const,
     };
   }
 }
@@ -145,6 +148,7 @@ async function main() {
     // Check live settings from DB (Kill switch & Mode)
     const settings = await getLiveSettings();
     brain.updateScope(settings.allowedGroupIds, settings.blockedUserIds);
+    brain.setGeminiConfig(settings.geminiKeys, settings.geminiModel, settings.geminiMode);
     if (settings.emergencyKillSwitch) {
       console.log(`[Kill Switch Active] Skipping AI reply for chat ${chatId}.`);
       return;
