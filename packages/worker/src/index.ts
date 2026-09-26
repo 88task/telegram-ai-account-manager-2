@@ -4,7 +4,7 @@ import { NewMessage } from 'telegram/events/index.js';
 import { BrainPipeline, OperatingMode } from '@telegram-ai/brain';
 import { TelegramSender } from './sender.js';
 import crypto from 'crypto';
-import { db, telegramSessions, systemSettings, messages, conversations, auditLogs, eq } from '@telegram-ai/db';
+import { db, telegramSessions, systemSettings, messages, conversations, auditLogs, approvalQueue, eq } from '@telegram-ai/db';
 import 'dotenv/config';
 
 function decryptSessionString(stored: string): string {
@@ -208,6 +208,25 @@ async function main() {
       });
     } catch (e: any) {
       // ignore audit log failure
+    }
+
+    if (decision.action === 'approval_required') {
+      try {
+        await db.insert(approvalQueue).values({
+          chatId,
+          incomingMessageId: msg.id,
+          suggestedReply: decision.replyText || '[Human response required]',
+          aiConfidence: decision.confidence ?? 0.5,
+          aiReasoning: decision.reason || 'Flagged for human moderation',
+          status: 'pending',
+        });
+        await db.update(conversations)
+          .set({ requiresHumanReview: true, unanswered: true })
+          .where(eq(conversations.chatId, chatId));
+        console.log();
+      } catch (err: any) {
+        console.error('Failed to insert into approval_queue:', err);
+      }
     }
 
     if (decision.action === 'auto_sent' && decision.replyText) {
