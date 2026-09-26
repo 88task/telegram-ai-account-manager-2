@@ -1,5 +1,5 @@
 import { LUMO_KNOWLEDGE, LUMO_SAFETY_TIPS, LUMO_SUPPORTED_BANKS, searchKnowledge } from './lumo-knowledge.js';
-import { db, knowledgeItems, desc } from '@telegram-ai/db';
+import { db, knowledgeItems, contacts, eq, desc } from '@telegram-ai/db';
 
 export interface MemoryContext {
   approvedExamples: Array<{ userMessage: string; approvedReply: string }>;
@@ -17,7 +17,8 @@ export class ContextBuilder {
     contactId: string,
     queryKeywords: string[]
   ): Promise<MemoryContext> {
-    const dynamicRules: string[] = [];
+    const [contact] = await db.select().from(contacts).where(eq(contacts.telegramUserId, contactId)).limit(1);
+    const dynamicRules: string[] = contact?.customInstructions ? [`Contact instructions: ${contact.customInstructions}`] : [];
     const dynamicApprovedExamples: Array<{ userMessage: string; approvedReply: string }> = [];
 
     try {
@@ -49,6 +50,7 @@ export class ContextBuilder {
     // Business rule set: dynamic DB knowledge + LUMO platform policies + permanent ban rules
     const businessRules: string[] = [
       ...dynamicRules,
+      ...(contact?.notes ? [`Contact notes: ${contact.notes}`] : []),
       ...LUMO_KNOWLEDGE.map(e => `[${e.category.toUpperCase()}] ${e.title}: ${e.content}`),
       `Supported banks: ${LUMO_SUPPORTED_BANKS.join(', ')}.`,
       `WhatsApp safety tips to share with users (ONLY for account warm-up and temporary ban prevention, NOT for permanent bans):
@@ -109,7 +111,7 @@ ${LUMO_SAFETY_TIPS}`,
           approvedReply: "Aap Forgot Password option se apna password khud reset kar sakte ho. Wahan apna registered detail daalo, reset link mil jayega."
         }
       ],
-      contactNotes: "LUMO platform user / group member."
+      contactNotes: contact?.notes || 'LUMO platform user / group member.'
     };
   }
 }

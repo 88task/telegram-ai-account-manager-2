@@ -4,7 +4,8 @@ export class ModeDispatcher {
   private confidenceThreshold: number;
 
   constructor(confidenceThreshold?: number) {
-    this.confidenceThreshold = confidenceThreshold ?? parseFloat(process.env.AUTO_PILOT_CONFIDENCE_THRESHOLD || '0.85');
+    const threshold = confidenceThreshold ?? Number(process.env.AUTO_PILOT_CONFIDENCE_THRESHOLD || '0.85');
+    this.confidenceThreshold = Number.isFinite(threshold) && threshold >= 0 && threshold <= 1 ? threshold : 0.85;
   }
 
   public dispatch(
@@ -12,6 +13,10 @@ export class ModeDispatcher {
     reply: GeneratedReply,
     safety: SafetyResult
   ): DecisionResult {
+    if (!reply.text?.trim() || !Number.isFinite(reply.confidence) || reply.confidence < 0 || reply.confidence > 1) {
+      return { action: 'approval_required', replyText: reply.text || '', confidence: 0, reason: 'Invalid or empty model response requires human review.' };
+    }
+
     // 1. Safety escalation always supersedes auto-pilot
     if (!safety.safeForAutoPilot) {
       return {

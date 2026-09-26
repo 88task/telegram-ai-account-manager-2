@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"require('node:fs').cpSync('src/public', 'dist/public', { recursive: true })\"",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js"
   },

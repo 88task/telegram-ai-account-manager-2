@@ -1,4 +1,4 @@
-import { GeminiClientPool } from '../generator/gemini-client.js';
+import { GeminiClientPool, GeminiContentOptions } from '../generator/gemini-client.js';
 import { getBedrockClient } from '../generator/client-factory.js';
 import {
   BedrockRuntimeClient,
@@ -58,6 +58,17 @@ export class CognitiveOrchestrator {
     this.fastModelId = process.env.BEDROCK_FAST_MODEL_ID || 'amazon.nova-lite-v1:0';
   }
 
+  private async generate(command: ConverseCommand, options: GeminiContentOptions): Promise<string> {
+    if (this.providerMode === 'gemini') return this.geminiPool.generateContent(options);
+    try {
+      const response = await this.client.send(command, { abortSignal: AbortSignal.timeout(30_000) });
+      return response.output?.message?.content?.map(part => part.text || '').join('') || '';
+    } catch (error) {
+      if (this.providerMode === 'auto' && this.geminiPool.hasKeys()) return this.geminiPool.generateContent(options);
+      throw error;
+    }
+  }
+
   /**
    * Stage 1: Perception Agent
    * Understands implicit tone, emotion, urgency, and underlying intent.
@@ -86,21 +97,11 @@ OUTPUT STRICT JSON ONLY:
         inferenceConfig: { temperature: 0.1, maxTokens: 256 }
       });
 
-      const res = await this.client.send(command);
-      const text = res.output?.message?.content?.[0]?.text || '';
+      const text = await this.generate(command, { prompt, jsonMode: true });
       const match = text.match(/\{[\s\S]*\}/);
       if (match) return JSON.parse(match[0]);
-    } catch (bedrockErr: any) {
-      // Fallback to Gemini if fast Bedrock model fails
-      if (this.geminiPool.hasKeys()) {
-        try {
-          const geminiRes = await this.geminiPool.generateContent({ prompt });
-          const match = geminiRes.match(/\{[\s\S]*\}/);
-          if (match) return JSON.parse(match[0]);
-        } catch (gemErr) {
-          console.warn('[Gemini Perception Fallback Error]:', gemErr);
-        }
-      }
+    } catch {
+      console.warn('[AI] Perception unavailable; using offline intent detection.');
     }
 
     return {
@@ -158,37 +159,15 @@ ${memory.approvedExamples.map(e => `Q: "${e.userMessage}"\nA: "${e.approvedReply
       inferenceConfig: { temperature: 0.3, maxTokens: 512 }
     });
 
-    // If providerMode is 'gemini' and keys are configured, use Gemini directly
-    if (this.providerMode === 'gemini' && this.geminiPool.hasKeys()) {
-      try {
-        return await this.geminiPool.generateContent({
-          systemInstruction: systemPrompt,
-          prompt: `User message: "${message.text}"`,
-          imageBuffer: message.mediaBuffer,
-          imageMimeType: message.mediaMimeType,
-        });
-      } catch (geminiErr: any) {
-        console.error('[Gemini Primary Synthesis Error]:', geminiErr);
-      }
-    }
-
     try {
-      const res = await this.client.send(command);
-      return res.output?.message?.content?.[0]?.text || '';
-    } catch (err: any) {
-      console.warn('Bedrock synthesizeDraft failed, attempting Gemini fallback:', err.message);
-      if (this.geminiPool.hasKeys()) {
-        try {
-          return await this.geminiPool.generateContent({
-            systemInstruction: systemPrompt,
-            prompt: `User message: "${message.text}"`,
-            imageBuffer: message.mediaBuffer,
-            imageMimeType: message.mediaMimeType,
-          });
-        } catch (geminiErr: any) {
-          console.error('[Gemini Fallback Synthesis Error]:', geminiErr);
-        }
-      }
+      return await this.generate(command, {
+        systemInstruction: systemPrompt,
+        prompt: `Recent history: ${JSON.stringify(recentHistory)}\nUser message: ${message.text || '[Image]'}`,
+        imageBuffer: message.mediaBuffer,
+        imageMimeType: message.mediaMimeType,
+      });
+    } catch {
+      console.warn('[AI] Synthesis unavailable; preparing a draft for verification.');
       return this.generateKnowledgeFallback(message.text || '', perception.detectedDialect);
     }
   }
@@ -347,20 +326,30 @@ OUTPUT STRICT JSON ONLY:
         inferenceConfig: { temperature: 0.1, maxTokens: 512 }
       });
 
-      const res = await this.client.send(command);
-      const text = res.output?.message?.content?.[0]?.text || '';
+      const text = await this.generate(command, { prompt, jsonMode: true });
       const match = text.match(/\{[\s\S]*\}/);
-      if (match) return JSON.parse(match[0]);
-    } catch (err) {
-      console.error('Self-critique failed:', err);
+      if (match) {
+        const result = JSON.parse(match[0]);
+        if (typeof result.confidenceScore === 'number' && Number.isFinite(result.confidenceScore) && result.confidenceScore >= 0 && result.confidenceScore <= 1) {
+          return {
+            passedHallucinationCheck: result.passedHallucinationCheck === true,
+            passedPolicyCheck: result.passedPolicyCheck === true,
+            toneMatchesOwner: result.toneMatchesOwner === true,
+            confidenceScore: result.confidenceScore,
+            critiqueNotes: typeof result.critiqueNotes === 'string' ? result.critiqueNotes : 'Model critique',
+            revisedReply: typeof result.revisedReply === 'string' ? result.revisedReply : undefined,
+          };
+        }
+      }
+    } catch {
+      console.warn('[AI] Critique unavailable; human verification required.');
     }
-
     return {
-      passedHallucinationCheck: true,
-      passedPolicyCheck: true,
-      toneMatchesOwner: true,
-      confidenceScore: 0.85,
-      critiqueNotes: 'Default pass with standard confidence'
+      passedHallucinationCheck: false,
+      passedPolicyCheck: false,
+      toneMatchesOwner: false,
+      confidenceScore: 0,
+      critiqueNotes: 'Model response could not be verified; human review required'
     };
   }
 

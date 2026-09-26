@@ -486,6 +486,11 @@
   </main>
 
   <script>
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+    function jsArgument(value) { return escapeHtml(JSON.stringify(String(value))); }
+
     let globalStats = null;
     let selectedChatId = null;
     let allConversations = [];
@@ -549,7 +554,7 @@
       // Session status
       const statusText = document.getElementById('session-status-text');
       if (data.session.connected) {
-        statusText.innerHTML = `<span class="text-emerald-400 font-medium">● Connected</span> (${data.session.phone || 'Active Session'})`;
+        statusText.innerHTML = `<span class="text-emerald-400 font-medium">● Connected</span> (${escapeHtml(data.session.phone || 'Active Session')})`;
       } else {
         statusText.innerHTML = `<span class="text-rose-400 font-medium">○ Disconnected</span> <button onclick="openAuthModal()" class="ml-2 px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/30 hover:bg-sky-500/30 transition-all">Connect Telegram</button>`;
       }
@@ -649,8 +654,8 @@
         card.innerHTML = `
           <div class="flex items-center justify-between text-xs">
             <div class="flex items-center gap-2">
-              <span class="px-2 py-0.5 rounded font-mono bg-gray-800 text-gray-300">Chat ID: ${item.chatId}</span>
-              <span class="text-gray-400">Message ID: #${item.incomingMessageId}</span>
+              <span class="px-2 py-0.5 rounded font-mono bg-gray-800 text-gray-300">Chat ID: ${escapeHtml(item.chatId)}</span>
+              <span class="text-gray-400">Message ID: #${escapeHtml(item.incomingMessageId)}</span>
             </div>
             <div class="flex items-center gap-2">
               <span class="text-xs text-gray-400">AI Confidence:</span>
@@ -660,22 +665,23 @@
 
           <div class="p-3 rounded-xl bg-gray-900/60 border border-gray-800 text-xs space-y-1">
             <span class="text-gray-400 font-semibold uppercase text-[10px] tracking-wider">AI Reasoning & Policy Checks:</span>
-            <p class="text-gray-300">${item.aiReasoning || 'Routed for human verification'}</p>
+            <p>Status: ${escapeHtml(item.status)}${item.status !== 'pending' ? ' — verify delivery in Telegram before composing another reply.' : ''}</p>
+            <p class="text-gray-300">${escapeHtml(item.aiReasoning || 'Routed for human verification')}</p>
           </div>
 
           <div class="space-y-1">
             <label class="text-xs text-sky-400 font-semibold">Suggested Response (editable):</label>
-            <textarea id="reply-text-${item.id}" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-sky-500 font-sans">${item.suggestedReply}</textarea>
+            <textarea id="reply-text-${Number(item.id)}" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-sky-500 font-sans">${escapeHtml(item.suggestedReply)}</textarea>
           </div>
 
           <div class="flex justify-end gap-2 pt-1">
-            <button onclick="resolveApproval(${item.id}, 'reject')" class="px-3.5 py-1.5 rounded-xl text-xs font-medium text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20">
+            <button onclick="resolveApproval(${Number(item.id)}, 'reject')" class="px-3.5 py-1.5 rounded-xl text-xs font-medium text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20">
               <i class="fa-solid fa-xmark mr-1"></i>Reject
             </button>
-            <button onclick="resolveApproval(${item.id}, 'edit')" class="px-3.5 py-1.5 rounded-xl text-xs font-medium text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20">
+            <button onclick="resolveApproval(${Number(item.id)}, 'edit')" ${item.status !== 'pending' ? 'disabled' : ''} class="px-3.5 py-1.5 rounded-xl text-xs font-medium text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20">
               <i class="fa-solid fa-pen-to-square mr-1"></i>Save & Send Edited
             </button>
-            <button onclick="resolveApproval(${item.id}, 'approve')" class="px-4 py-1.5 rounded-xl text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 shadow-lg shadow-sky-500/20">
+            <button onclick="resolveApproval(${Number(item.id)}, 'approve')" ${item.status !== 'pending' ? 'disabled' : ''} class="px-4 py-1.5 rounded-xl text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 shadow-lg shadow-sky-500/20">
               <i class="fa-solid fa-check mr-1"></i>Approve & Dispatch
             </button>
           </div>
@@ -684,16 +690,39 @@
       });
     }
 
+    async function sendManualReply() {
+      const input = document.getElementById('manual-reply-input');
+      const button = document.getElementById('manual-reply-btn');
+      if (!selectedChatId || !input.value.trim()) return;
+      const submittedText = input.value;
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/conversations/${encodeURIComponent(selectedChatId)}/send`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: submittedText })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Reply could not be sent');
+        if (input.value === submittedText) input.value = '';
+        await selectChat(selectedChatId, document.getElementById('selected-chat-title').innerText);
+        await loadStats();
+      } catch (error) { alert(error.message); }
+      finally { button.disabled = false; }
+    }
+
     async function resolveApproval(id, action) {
       const textarea = document.getElementById(`reply-text-${id}`);
       const editedReply = textarea ? textarea.value : '';
-      await fetch(`/api/approvals/${id}/decide`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, editedReply })
-      });
-      loadApprovals();
-      loadStats();
+      try {
+        const response = await fetch(`/api/approvals/${id}/decide`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, editedReply })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) alert(result.error || "Decision failed");
+        await loadApprovals();
+        await loadStats();
+      } catch (error) { alert('Decision could not be confirmed. Check the queue and Telegram before retrying.'); }
     }
 
     // Conversations
@@ -729,10 +758,10 @@
         div.onclick = () => selectChat(c.chatId, c.chatTitle || `User ${c.chatId}`);
         div.innerHTML = `
           <div class="flex items-center justify-between mb-1">
-            <span class="text-xs font-semibold text-white truncate max-w-[150px]">${c.chatTitle || `Chat ${c.chatId}`}</span>
+            <span class="text-xs font-semibold text-white truncate max-w-[150px]">${escapeHtml(c.chatTitle || `Chat ${c.chatId}`)}</span>
             ${c.unanswered ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">Reply Required</span>' : '<span class="text-[10px] text-gray-500">Answered</span>'}
           </div>
-          <p class="text-xs text-gray-400 truncate">${c.lastMessageText || 'No message preview'}</p>
+          <p class="text-xs text-gray-400 truncate">${escapeHtml(c.lastMessageText || 'No message preview')}</p>
         `;
         list.appendChild(div);
       });
@@ -762,8 +791,8 @@
         msgDiv.className = `flex flex-col ${m.isOutgoing ? 'items-end' : 'items-start'}`;
         msgDiv.innerHTML = `
           <div class="max-w-[75%] p-3 rounded-2xl text-xs ${m.isOutgoing ? 'bg-sky-600 text-white rounded-br-none' : 'bg-gray-800 text-gray-200 rounded-bl-none'}">
-            ${m.mediaType ? `<div class="mb-1 text-[10px] uppercase font-bold text-sky-200"><i class="fa-solid fa-paperclip mr-1"></i>${m.mediaType}</div>` : ''}
-            <div>${m.text || ''}</div>
+            ${m.mediaType ? `<div class="mb-1 text-[10px] uppercase font-bold text-sky-200"><i class="fa-solid fa-paperclip mr-1"></i>${escapeHtml(m.mediaType)}</div>` : ''}
+            <div>${escapeHtml(m.text || '')}</div>
           </div>
           <span class="text-[10px] text-gray-500 mt-1 px-1">${new Date(m.createdAt).toLocaleTimeString()}</span>
         `;
@@ -784,8 +813,8 @@
           const row = document.createElement('div');
           row.className = 'p-3 flex items-center justify-between';
           row.innerHTML = `
-            <span class="font-mono text-gray-300">${id}</span>
-            <button onclick="removeAllowedGroup('${id}')" class="text-rose-400 hover:text-rose-300 text-xs"><i class="fa-solid fa-trash"></i></button>
+            <span class="font-mono text-gray-300">${escapeHtml(id)}</span>
+            <button onclick="removeAllowedGroup(${jsArgument(id)})" class="text-rose-400 hover:text-rose-300 text-xs"><i class="fa-solid fa-trash"></i></button>
           `;
           groupList.appendChild(row);
         });
@@ -801,8 +830,8 @@
           const row = document.createElement('div');
           row.className = 'p-3 flex items-center justify-between';
           row.innerHTML = `
-            <span class="font-mono text-gray-300">${id}</span>
-            <button onclick="removeBlockedUser('${id}')" class="text-rose-400 hover:text-rose-300 text-xs"><i class="fa-solid fa-trash"></i></button>
+            <span class="font-mono text-gray-300">${escapeHtml(id)}</span>
+            <button onclick="removeBlockedUser(${jsArgument(id)})" class="text-rose-400 hover:text-rose-300 text-xs"><i class="fa-solid fa-trash"></i></button>
           `;
           userList.appendChild(row);
         });
@@ -820,8 +849,8 @@
             const row = document.createElement('div');
             row.className = 'p-3 flex items-center justify-between';
             row.innerHTML = `
-              <span class="font-mono text-gray-300">${id}</span>
-              <button onclick="removeIgnoredAdmin('${id}')" class="text-rose-400 hover:text-rose-300 text-xs"><i class="fa-solid fa-trash"></i></button>
+              <span class="font-mono text-gray-300">${escapeHtml(id)}</span>
+              <button onclick="removeIgnoredAdmin(${jsArgument(id)})" class="text-rose-400 hover:text-rose-300 text-xs"><i class="fa-solid fa-trash"></i></button>
             `;
             adminList.appendChild(row);
           });
@@ -990,19 +1019,19 @@
         const div = document.createElement('div');
         div.className = 'p-3 rounded-xl bg-gray-900/60 border border-gray-800 text-xs space-y-1.5';
         const tagBadges = (item.tags && item.tags.length)
-          ? `<div class="flex flex-wrap gap-1 mt-1">${item.tags.map(t => `<span class="px-1.5 py-0.5 rounded bg-gray-800 text-[10px] text-gray-400">#${t}</span>`).join('')}</div>`
+          ? `<div class="flex flex-wrap gap-1 mt-1">${item.tags.map(t => `<span class="px-1.5 py-0.5 rounded bg-gray-800 text-[10px] text-gray-400">#${escapeHtml(t)}</span>`).join('')}</div>`
           : '';
         div.innerHTML = `
           <div class="flex items-center justify-between">
-            <span class="font-bold text-sky-400 capitalize">${item.category}: ${item.questionOrTrigger || 'General'}</span>
+            <span class="font-bold text-sky-400 capitalize">${escapeHtml(item.category)}: ${escapeHtml(item.questionOrTrigger || 'General')}</span>
             <div class="flex items-center gap-2">
               <span class="text-gray-500 text-[10px]">${new Date(item.createdAt).toLocaleDateString()}</span>
-              <button onclick="deleteKnowledgeItem(${item.id})" class="text-gray-500 hover:text-red-400 text-xs transition" title="Delete knowledge item">
+              <button onclick="deleteKnowledgeItem(${Number(item.id)})" class="text-gray-500 hover:text-red-400 text-xs transition" title="Delete knowledge item">
                 <i class="fa-solid fa-trash-can"></i>
               </button>
             </div>
           </div>
-          <p class="text-gray-300 leading-relaxed whitespace-pre-wrap">${item.content}</p>
+          <p class="text-gray-300 leading-relaxed whitespace-pre-wrap">${escapeHtml(item.content)}</p>
           ${tagBadges}
         `;
         list.appendChild(div);
@@ -1024,10 +1053,10 @@
         tr.className = 'hover:bg-gray-800/40';
         tr.innerHTML = `
           <td class="p-3 text-gray-400 whitespace-nowrap">${new Date(log.createdAt).toLocaleTimeString()}</td>
-          <td class="p-3 font-mono text-sky-400">${log.eventType}</td>
-          <td class="p-3 font-mono text-gray-300">${log.chatId || '-'}</td>
-          <td class="p-3 text-gray-200">${log.actionTaken}</td>
-          <td class="p-3 text-gray-400 truncate max-w-xs">${JSON.stringify(log.details || {})}</td>
+          <td class="p-3 font-mono text-sky-400">${escapeHtml(log.eventType)}</td>
+          <td class="p-3 font-mono text-gray-300">${escapeHtml(log.chatId || '-')}</td>
+          <td class="p-3 text-gray-200">${escapeHtml(log.actionTaken)}</td>
+          <td class="p-3 text-gray-400 truncate max-w-xs">${escapeHtml(JSON.stringify(log.details || {}))}</td>
         `;
         tbody.appendChild(tr);
       });
@@ -1075,12 +1104,12 @@
                   <div class="flex items-center gap-3">
                     <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50"></div>
                     <div>
-                      <div class="font-bold text-white">${k.label || 'Unnamed Key'}</div>
-                      <div class="text-[11px] font-mono text-gray-400">${k.maskedKey || '••••••••'}</div>
+                      <div class="font-bold text-white">${escapeHtml(k.label || 'Unnamed Key')}</div>
+                      <div class="text-[11px] font-mono text-gray-400">${escapeHtml(k.maskedKey || '••••••••')}</div>
                     </div>
                   </div>
                   <div class="flex items-center gap-2">
-                    <button onclick="deleteGeminiKey('${k.id}')" class="text-gray-400 hover:text-red-400 p-1.5 text-xs transition" title="Delete key">
+                    <button onclick="deleteGeminiKey(${jsArgument(k.id)})" class="text-gray-400 hover:text-red-400 p-1.5 text-xs transition" title="Delete key">
                       <i class="fa-solid fa-trash-can"></i>
                     </button>
                   </div>

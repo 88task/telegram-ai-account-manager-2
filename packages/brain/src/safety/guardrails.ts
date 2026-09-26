@@ -20,7 +20,7 @@ export class SafetyGuardrails {
     const angerKeywords = ['angry', 'unacceptable', 'scam', 'cheat', 'complaint', 'lawyer', 'legal action', 'sue', 'police', 'terrible service'];
     if (angerKeywords.some(kw => text.includes(kw))) {
       escalationReasons.push('Customer frustration, anger, or legal threat detected.');
-      sensitiveCategory = angerKeywords.some(k => ['lawyer', 'legal action', 'sue'].includes(k)) ? 'legal' : 'anger';
+      sensitiveCategory = ['lawyer', 'legal action', 'sue'].some(k => text.includes(k)) ? 'legal' : 'anger';
     }
 
     // 3. High-Value Business Deals & Partnerships

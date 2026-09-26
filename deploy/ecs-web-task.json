@@ -1,7 +1,9 @@
 {
   "family": "telegram-ai-web",
   "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
   "cpu": "256",
   "memory": "512",
   "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole",
@@ -18,12 +20,44 @@
         }
       ],
       "environment": [
-        { "name": "NODE_ENV", "value": "production" },
-        { "name": "PORT", "value": "3000" },
-        { "name": "AWS_REGION", "value": "ap-south-1" }
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        },
+        {
+          "name": "PORT",
+          "value": "3000"
+        },
+        {
+          "name": "AWS_REGION",
+          "value": "ap-south-1"
+        }
       ],
       "secrets": [
-        { "name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/DATABASE_URL" }
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/DATABASE_URL"
+        },
+        {
+          "name": "PANEL_USERNAME",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/PANEL_USERNAME"
+        },
+        {
+          "name": "PANEL_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/PANEL_PASSWORD"
+        },
+        {
+          "name": "SESSION_ENCRYPTION_KEY",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/SESSION_ENCRYPTION_KEY"
+        },
+        {
+          "name": "TELEGRAM_API_ID",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/TELEGRAM_API_ID"
+        },
+        {
+          "name": "TELEGRAM_API_HASH",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<ACCOUNT_ID>:secret:telegram-ai/TELEGRAM_API_HASH"
+        }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",

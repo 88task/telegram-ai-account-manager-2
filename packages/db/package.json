@@ -5,12 +5,13 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "push": "drizzle-kit push",
+    "push": "pnpm build && node dist/migrate.js && drizzle-kit push",
     "studio": "drizzle-kit studio"
   },
   "dependencies": {
     "drizzle-orm": "^0.33.0",
-    "pg": "^8.12.0"
+    "pg": "^8.12.0",
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@types/pg": "^8.11.6",

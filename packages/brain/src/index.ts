@@ -62,7 +62,7 @@ export class BrainPipeline {
     }
 
     // 2. Moderation Scoring (Profanity, repeated scam claims, payment disputes)
-    const moderation = this.moderationScorer.evaluate(incoming);
+    const moderation = await this.moderationScorer.evaluatePersistent(incoming);
 
     // Severe abuse or repeated violations route straight to Human Approval Queue
     if (moderation.requiresHumanReview && !moderation.isSafeToAutoReply) {
@@ -82,6 +82,10 @@ export class BrainPipeline {
         incoming.mediaMimeType,
         incoming.text
       );
+
+      if (screenshotAnalysis.providerUnavailable) {
+        return { action: 'approval_required', replyText: '', confidence: 0, reason: 'Vision unavailable. Review the image and compose a human response.', screenshotAnalysis };
+      }
 
       // Look once: if screenshot does not match a known issue, skip silently (no reply)
       if (screenshotAnalysis.isAmbiguous) {
@@ -130,6 +134,12 @@ export class BrainPipeline {
       memory,
       formattedHistory
     );
+
+    const critique = cognitiveExecution.critique;
+    if (critique.passedHallucinationCheck !== true || critique.passedPolicyCheck !== true || critique.toneMatchesOwner !== true) {
+      safety.safeForAutoPilot = false;
+      safety.escalationReasons.push('Model critique failed or could not verify the response.');
+    }
 
     // 9. Dispatch to Manual, Draft, or Auto-Pilot based on Self-Critique Confidence
     const dispatchResult = this.dispatcher.dispatch(

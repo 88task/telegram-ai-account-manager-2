@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, doublePrecision, jsonb, serial, integer } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, doublePrecision, jsonb, serial, bigserial, integer, uniqueIndex } from 'drizzle-orm/pg-core';
 
 export const telegramSessions = pgTable('telegram_sessions', {
   id: serial('id').primaryKey(),
@@ -45,6 +45,16 @@ export const messages = pgTable('messages', {
   mediaType: text('media_type'), // 'image', 'document', etc.
   mediaUrl: text('media_url'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  chatTelegramMessageUnique: uniqueIndex('messages_chat_telegram_message_uidx')
+    .on(table.chatId, table.telegramMessageId),
+}));
+
+// Keep the recovery archive in the schema so db:push does not propose deleting it.
+export const messageDuplicateArchive = pgTable('messages_duplicate_archive', {
+  archiveId: bigserial('archive_id', { mode: 'number' }).primaryKey(),
+  archivedAt: timestamp('archived_at').defaultNow().notNull(),
+  originalRow: jsonb('original_row').notNull(),
 });
 
 export const approvalQueue = pgTable('approval_queue', {
@@ -83,4 +93,9 @@ export const systemSettings = pgTable('system_settings', {
   key: text('key').notNull().unique(),
   value: text('value').notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export const moderationStates = pgTable('moderation_states', {
+  key: text('key').primaryKey(),
+  state: jsonb('state').notNull(),
 });
