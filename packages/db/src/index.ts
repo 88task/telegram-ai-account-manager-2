@@ -46,7 +46,7 @@ export async function initDb(): Promise<void> {
 
       CREATE TABLE IF NOT EXISTS conversations (
         id SERIAL PRIMARY KEY,
-        chat_id TEXT NOT NULL UNIQUE,
+        chat_id TEXT UNIQUE,
         account_key TEXT DEFAULT 'default',
         chat_title TEXT,
         chat_type TEXT NOT NULL DEFAULT 'private',
@@ -111,6 +111,9 @@ export async function initDb(): Promise<void> {
       -- Comprehensive column backfill for pre-existing tables
       ALTER TABLE conversations ADD COLUMN IF NOT EXISTS id SERIAL;
       ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_id TEXT;
+      -- Retain legacy JIDs, but new Telegram conversations only supply chat_id.
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_jid TEXT;
+      ALTER TABLE conversations ALTER COLUMN chat_jid DROP NOT NULL;
       ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_title TEXT;
       ALTER TABLE conversations ADD COLUMN IF NOT EXISTS chat_type TEXT DEFAULT 'private';
       ALTER TABLE conversations ADD COLUMN IF NOT EXISTS last_message_text TEXT;
@@ -257,6 +260,24 @@ export async function initDb(): Promise<void> {
         END IF;
       END $$;
     `);
+    // EXPLAIN does not check NOT NULL constraints. Inspect the columns omitted by
+    // the worker's inserts too, so unsupported legacy requirements fail at startup.
+    // Leave unknown constraints intact; they may protect data from an older app.
+    for (const [table, suppliedColumns] of [
+      ['messages', ['telegram_message_id', 'chat_id', 'sender_id', 'text', 'is_outgoing', 'created_at', 'media_type']],
+      ['conversations', ['chat_id', 'account_key', 'chat_title', 'chat_type', 'last_message_text', 'last_message_at', 'unanswered']],
+    ] as const) {
+      const required = await client.query<{ attname: string }>(`
+        SELECT attname FROM pg_attribute
+        WHERE attrelid = to_regclass($1) AND attnum > 0 AND NOT attisdropped
+          AND attnotnull AND NOT atthasdef AND attidentity = '' AND attgenerated = ''
+          AND NOT (attname = ANY($2::text[]))
+        ORDER BY attnum`, [table, [...suppliedColumns]]);
+      if (required.rows.length) {
+        throw new Error(`Database schema incompatible with incoming-message inserts: ${table} requires omitted columns (${required.rows.map(row => row.attname).join(', ')}). Migrate these columns before starting the worker.`);
+      }
+    }
+
     // EXPLAIN validates index inference without executing either write. A malformed
     // legacy index must fail startup rather than silently discard incoming messages.
     await client.query(`EXPLAIN INSERT INTO messages (chat_id, telegram_message_id, sender_id, is_outgoing)

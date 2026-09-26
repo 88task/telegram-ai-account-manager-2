@@ -25,7 +25,10 @@ export const contacts = pgTable('contacts', {
 
 export const conversations = pgTable('conversations', {
   id: serial('id').primaryKey(),
-  chatId: text('chat_id').notNull().unique(),
+  // Legacy rows can have only chatJid; all new Telegram writes supply chatId.
+  chatId: text('chat_id').unique(),
+  // Retained only to preserve data from legacy deployments; Telegram uses chatId.
+  chatJid: text('chat_jid'),
   accountKey: text('account_key').default('default'),
   chatTitle: text('chat_title'),
   chatType: text('chat_type').default('private').notNull(), // 'private' | 'group'

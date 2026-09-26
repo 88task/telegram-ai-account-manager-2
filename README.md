@@ -140,6 +140,12 @@ human-review flags are retained if any duplicate had them set. Removed rows, inc
 legacy columns, are preserved in `conversations_duplicate_archive.original_row`.
 This repair runs in the same locked transaction as the other migrations. Startup
 validates both incoming-message conflict targets before allowing the worker to run.
+The obsolete `conversations.chat_jid` column is retained as nullable so existing JID
+values survive and new Telegram conversations can use `chat_id` alone. JIDs are not
+converted into Telegram IDs. Startup also checks for required columns omitted by
+incoming-message inserts; unknown columns without a default produce an explicit
+schema error before the worker runs, rather than repeatedly skipping messages.
+
 
 
 
