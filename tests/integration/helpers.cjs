@@ -13,7 +13,6 @@ exports.openTestDatabase = async function () {
   await admin.query(`CREATE SCHEMA ${schema}`);
   url.searchParams.set('options', `-c search_path=${schema}`);
   process.env.DATABASE_URL = url.toString();
-  process.env.DATABASE_SSL_REJECT_UNAUTHORIZED = 'false';
   const database = require('../../packages/db/dist/index.js');
   return {
     ...database,
