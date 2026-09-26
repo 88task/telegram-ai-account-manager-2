@@ -4,104 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Telegram AI Account Manager</title>
-  <script src="https://cdn.tailwindcss.com">
-    // Gemini Settings & Multi-Key Pool
-    async function loadGeminiSettings() {
-      try {
-        const res = await fetch('/api/gemini/settings');
-        const json = await res.json();
-        if (json.success) {
-          const { providerMode, model, keys } = json.data;
-          document.getElementById('gemini-provider-mode').value = providerMode || 'auto';
-          document.getElementById('gemini-model-select').value = model || 'gemini-2.5-flash';
-
-          const badge = document.getElementById('gemini-status-badge');
-          if (keys && keys.length > 0) {
-            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700';
-            badge.innerText = `${keys.length} Active Key${keys.length > 1 ? 's' : ''}`;
-          } else {
-            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700';
-            badge.innerText = 'No Keys Configured';
-          }
-
-          const container = document.getElementById('gemini-keys-list');
-          if (!keys || keys.length === 0) {
-            container.innerHTML = '<div class="text-xs text-slate-400 italic py-2">No Gemini API keys configured yet. Add one below.</div>';
-          } else {
-            container.innerHTML = keys.map(k => `
-              <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                <div class="flex items-center gap-3">
-                  <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
-                  <div>
-                    <div class="text-sm font-semibold text-slate-800">${k.label}</div>
-                    <div class="text-xs font-mono text-slate-500">${k.maskedKey}</div>
-                  </div>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button onclick="deleteGeminiKey('${k.id}')" class="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1">Delete</button>
-                </div>
-              </div>
-            `).join('');
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to load Gemini settings:', e);
-      }
-    }
-
-    async function addGeminiKey() {
-      const label = document.getElementById('gemini-key-label').value.trim();
-      const key = document.getElementById('gemini-new-key').value.trim();
-      if (!key) return alert('Please enter a Gemini API Key');
-
-      try {
-        const res = await fetch('/api/gemini/keys', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ label, key })
-        });
-        const json = await res.json();
-        if (json.success) {
-          document.getElementById('gemini-new-key').value = '';
-          document.getElementById('gemini-key-label').value = '';
-          await saveGeminiProviderSettings();
-          await loadGeminiSettings();
-        } else {
-          alert('Error: ' + json.error);
-        }
-      } catch (e) {
-        alert('Failed to add key: ' + e.message);
-      }
-    }
-
-    async function deleteGeminiKey(id) {
-      if (!confirm('Are you sure you want to remove this Gemini API key from the pool?')) return;
-      try {
-        await fetch(`/api/gemini/keys/${id}`, { method: 'DELETE' });
-        await loadGeminiSettings();
-      } catch (e) {
-        alert('Failed to delete key: ' + e.message);
-      }
-    }
-
-    async function saveGeminiProviderSettings() {
-      const providerMode = document.getElementById('gemini-provider-mode').value;
-      const model = document.getElementById('gemini-model-select').value;
-      try {
-        await fetch('/api/gemini/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ providerMode, model })
-        });
-      } catch (e) {
-        console.warn('Failed to save provider mode/model:', e);
-      }
-    }
-
-    document.getElementById('gemini-provider-mode')?.addEventListener('change', saveGeminiProviderSettings);
-    document.getElementById('gemini-model-select')?.addEventListener('change', saveGeminiProviderSettings);
-
-</script>
+  <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script>
     tailwind.config = {
@@ -122,104 +25,7 @@
         }
       }
     }
-  
-    // Gemini Settings & Multi-Key Pool
-    async function loadGeminiSettings() {
-      try {
-        const res = await fetch('/api/gemini/settings');
-        const json = await res.json();
-        if (json.success) {
-          const { providerMode, model, keys } = json.data;
-          document.getElementById('gemini-provider-mode').value = providerMode || 'auto';
-          document.getElementById('gemini-model-select').value = model || 'gemini-2.5-flash';
-
-          const badge = document.getElementById('gemini-status-badge');
-          if (keys && keys.length > 0) {
-            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700';
-            badge.innerText = `${keys.length} Active Key${keys.length > 1 ? 's' : ''}`;
-          } else {
-            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700';
-            badge.innerText = 'No Keys Configured';
-          }
-
-          const container = document.getElementById('gemini-keys-list');
-          if (!keys || keys.length === 0) {
-            container.innerHTML = '<div class="text-xs text-slate-400 italic py-2">No Gemini API keys configured yet. Add one below.</div>';
-          } else {
-            container.innerHTML = keys.map(k => `
-              <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                <div class="flex items-center gap-3">
-                  <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
-                  <div>
-                    <div class="text-sm font-semibold text-slate-800">${k.label}</div>
-                    <div class="text-xs font-mono text-slate-500">${k.maskedKey}</div>
-                  </div>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button onclick="deleteGeminiKey('${k.id}')" class="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1">Delete</button>
-                </div>
-              </div>
-            `).join('');
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to load Gemini settings:', e);
-      }
-    }
-
-    async function addGeminiKey() {
-      const label = document.getElementById('gemini-key-label').value.trim();
-      const key = document.getElementById('gemini-new-key').value.trim();
-      if (!key) return alert('Please enter a Gemini API Key');
-
-      try {
-        const res = await fetch('/api/gemini/keys', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ label, key })
-        });
-        const json = await res.json();
-        if (json.success) {
-          document.getElementById('gemini-new-key').value = '';
-          document.getElementById('gemini-key-label').value = '';
-          await saveGeminiProviderSettings();
-          await loadGeminiSettings();
-        } else {
-          alert('Error: ' + json.error);
-        }
-      } catch (e) {
-        alert('Failed to add key: ' + e.message);
-      }
-    }
-
-    async function deleteGeminiKey(id) {
-      if (!confirm('Are you sure you want to remove this Gemini API key from the pool?')) return;
-      try {
-        await fetch(`/api/gemini/keys/${id}`, { method: 'DELETE' });
-        await loadGeminiSettings();
-      } catch (e) {
-        alert('Failed to delete key: ' + e.message);
-      }
-    }
-
-    async function saveGeminiProviderSettings() {
-      const providerMode = document.getElementById('gemini-provider-mode').value;
-      const model = document.getElementById('gemini-model-select').value;
-      try {
-        await fetch('/api/gemini/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ providerMode, model })
-        });
-      } catch (e) {
-        console.warn('Failed to save provider mode/model:', e);
-      }
-    }
-
-    document.getElementById('gemini-provider-mode')?.addEventListener('change', saveGeminiProviderSettings);
-    document.getElementById('gemini-model-select')?.addEventListener('change', saveGeminiProviderSettings);
-
-</script>
+  </script>
   <style>
     body { background-color: #0b0f19; color: #f3f4f6; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
     .glass-card { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
@@ -294,6 +100,10 @@
     </button>
     <button onclick="switchTab('audit')" class="tab-link py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2" id="tab-audit">
       <i class="fa-solid fa-clock-rotate-left"></i> Audit Logs
+    </button>
+    <button onclick="switchTab('gemini')" class="tab-link py-3 border-b-2 border-transparent text-gray-400 hover:text-gray-200 flex items-center gap-2" id="tab-gemini">
+      <i class="fa-solid fa-wand-magic-sparkles text-amber-400"></i> Gemini & AI Settings
+      <span id="tab-gemini-badge" class="px-1.5 py-0.2 rounded-full text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hidden">0</span>
     </button>
   </nav>
 
@@ -553,6 +363,95 @@
       </div>
     </div>
 
+    <!-- 7. GEMINI & AI SETTINGS VIEW -->
+    <div id="view-gemini" class="space-y-6 hidden">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-wand-magic-sparkles text-amber-400"></i> Gemini & AI Provider Settings
+          </h2>
+          <p class="text-xs text-gray-400">Configure multi-key pool rotation, active models, and fallback routing between Bedrock and Gemini</p>
+        </div>
+        <span id="gemini-status-badge" class="px-3 py-1 rounded-full text-xs font-semibold bg-gray-800 text-gray-400">
+          Loading status...
+        </span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Provider & Model Configuration -->
+        <div class="glass-card rounded-2xl p-6 border border-gray-800 space-y-4">
+          <h3 class="text-sm font-bold text-white flex items-center gap-2 border-b border-gray-800 pb-3">
+            <i class="fa-solid fa-sliders text-sky-400"></i> Provider Execution Mode
+          </h3>
+          <div class="space-y-3 text-xs">
+            <div>
+              <label class="block text-gray-400 mb-1 font-medium">Routing Strategy</label>
+              <select id="gemini-provider-mode" onchange="saveGeminiProviderSettings()" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-white outline-none focus:border-sky-500">
+                <option value="auto">Auto (Bedrock Nova Pro primary + Gemini fallback)</option>
+                <option value="gemini">Gemini Primary (Multi-Key round-robin rotation)</option>
+                <option value="bedrock">Bedrock Only (Amazon Nova Pro multimodal)</option>
+              </select>
+              <p class="text-[11px] text-gray-500 mt-1">Auto routes through Bedrock and automatically fails over to the Gemini key pool on rate limits.</p>
+            </div>
+            <div>
+              <label class="block text-gray-400 mb-1 font-medium">Gemini Model</label>
+              <select id="gemini-model-select" onchange="saveGeminiProviderSettings()" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-white outline-none focus:border-sky-500">
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Ultra-low latency, vision-capable)</option>
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro (Deep reasoning, multimodal)</option>
+                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+              </select>
+            </div>
+            <div class="pt-2">
+              <div class="p-3 rounded-xl bg-gray-900/60 border border-gray-800 text-[11px] text-gray-400 space-y-1">
+                <div class="flex items-center gap-2 text-sky-400 font-semibold">
+                  <i class="fa-solid fa-circle-info"></i> Multi-Key Pool Rotation
+                </div>
+                <p>When multiple keys are added, requests rotate round-robin across keys to multiply throughput and eliminate 429 quota exhaustion.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Add New Key Card -->
+        <div class="glass-card rounded-2xl p-6 border border-gray-800 space-y-4">
+          <h3 class="text-sm font-bold text-white flex items-center gap-2 border-b border-gray-800 pb-3">
+            <i class="fa-solid fa-key text-emerald-400"></i> Add Gemini API Key
+          </h3>
+          <div class="space-y-3 text-xs">
+            <div>
+              <label class="block text-gray-400 mb-1 font-medium">Key Label / Alias</label>
+              <input type="text" id="gemini-key-label" placeholder="e.g. Account 1 / Primary Project" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-white outline-none focus:border-sky-500" />
+            </div>
+            <div>
+              <label class="block text-gray-400 mb-1 font-medium">API Key Secret</label>
+              <input type="password" id="gemini-new-key" placeholder="AIzaSy..." class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-white outline-none focus:border-sky-500 font-mono" />
+            </div>
+            <div class="pt-2">
+              <button id="btn-add-gemini-key" onclick="addGeminiKey()" class="w-full py-2.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all">
+                <i class="fa-solid fa-plus"></i> Add Key to Pool
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active Key Pool List -->
+      <div class="glass-card rounded-2xl p-6 border border-gray-800 space-y-4">
+        <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+          <h3 class="text-sm font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-layer-group text-sky-400"></i> Active Key Pool & Status
+          </h3>
+          <button onclick="loadGeminiSettings()" class="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs text-gray-300">
+            <i class="fa-solid fa-rotate mr-1"></i> Refresh
+          </button>
+        </div>
+        <div id="gemini-keys-list" class="space-y-2">
+          <div class="text-xs text-gray-500 italic py-2">Loading keys...</div>
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <script>
@@ -562,7 +461,7 @@
 
     // Tab switcher
     function switchTab(tab) {
-      ['overview', 'approvals', 'conversations', 'scope', 'knowledge', 'audit'].forEach(t => {
+      ['overview', 'approvals', 'conversations', 'scope', 'knowledge', 'audit', 'gemini'].forEach(t => {
         document.getElementById(`view-${t}`).classList.add('hidden');
         document.getElementById(`tab-${t}`).classList.remove('border-sky-500', 'text-sky-400');
         document.getElementById(`tab-${t}`).classList.add('border-transparent', 'text-gray-400');
@@ -575,6 +474,7 @@
       if (tab === 'conversations') loadConversations();
       if (tab === 'knowledge') loadKnowledge();
       if (tab === 'audit') loadAuditLogs();
+      if (tab === 'gemini') loadGeminiSettings();
     }
 
     // Load initial stats
@@ -1030,10 +930,6 @@
       });
     }
 
-    // Init
-    loadStats();
-    setInterval(loadStats, 10000);
-  
     // Gemini Settings & Multi-Key Pool
     async function loadGeminiSettings() {
       try {
@@ -1041,36 +937,53 @@
         const json = await res.json();
         if (json.success) {
           const { providerMode, model, keys } = json.data;
-          document.getElementById('gemini-provider-mode').value = providerMode || 'auto';
-          document.getElementById('gemini-model-select').value = model || 'gemini-2.5-flash';
+          const modeEl = document.getElementById('gemini-provider-mode');
+          const modelEl = document.getElementById('gemini-model-select');
+          if (modeEl) modeEl.value = providerMode || 'auto';
+          if (modelEl) modelEl.value = model || 'gemini-2.5-flash';
 
           const badge = document.getElementById('gemini-status-badge');
-          if (keys && keys.length > 0) {
-            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700';
-            badge.innerText = `${keys.length} Active Key${keys.length > 1 ? 's' : ''}`;
-          } else {
-            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700';
-            badge.innerText = 'No Keys Configured';
+          const tabBadge = document.getElementById('tab-gemini-badge');
+          if (badge) {
+            if (keys && keys.length > 0) {
+              badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+              badge.innerHTML = `<i class="fa-solid fa-circle-check mr-1.5"></i>${keys.length} Active Key${keys.length > 1 ? 's' : ''}`;
+            } else {
+              badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30';
+              badge.innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-1.5"></i>No Keys Configured`;
+            }
+          }
+          if (tabBadge) {
+            if (keys && keys.length > 0) {
+              tabBadge.innerText = keys.length;
+              tabBadge.classList.remove('hidden');
+            } else {
+              tabBadge.classList.add('hidden');
+            }
           }
 
           const container = document.getElementById('gemini-keys-list');
-          if (!keys || keys.length === 0) {
-            container.innerHTML = '<div class="text-xs text-slate-400 italic py-2">No Gemini API keys configured yet. Add one below.</div>';
-          } else {
-            container.innerHTML = keys.map(k => `
-              <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                <div class="flex items-center gap-3">
-                  <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
-                  <div>
-                    <div class="text-sm font-semibold text-slate-800">${k.label}</div>
-                    <div class="text-xs font-mono text-slate-500">${k.maskedKey}</div>
+          if (container) {
+            if (!keys || keys.length === 0) {
+              container.innerHTML = '<div class="text-xs text-gray-500 italic py-6 text-center border border-dashed border-gray-800 rounded-xl">No Gemini API keys in the pool yet. Add one above.</div>';
+            } else {
+              container.innerHTML = keys.map(k => `
+                <div class="flex items-center justify-between p-3.5 bg-gray-900/60 border border-gray-800 rounded-xl text-xs">
+                  <div class="flex items-center gap-3">
+                    <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50"></div>
+                    <div>
+                      <div class="font-bold text-white">${k.label || 'Unnamed Key'}</div>
+                      <div class="text-[11px] font-mono text-gray-400">${k.maskedKey || '••••••••'}</div>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button onclick="deleteGeminiKey('${k.id}')" class="text-gray-400 hover:text-red-400 p-1.5 text-xs transition" title="Delete key">
+                      <i class="fa-solid fa-trash-can"></i>
+                    </button>
                   </div>
                 </div>
-                <div class="flex items-center gap-2">
-                  <button onclick="deleteGeminiKey('${k.id}')" class="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1">Delete</button>
-                </div>
-              </div>
-            `).join('');
+              `).join('');
+            }
           }
         }
       } catch (e) {
@@ -1079,9 +992,17 @@
     }
 
     async function addGeminiKey() {
-      const label = document.getElementById('gemini-key-label').value.trim();
-      const key = document.getElementById('gemini-new-key').value.trim();
+      const labelInput = document.getElementById('gemini-key-label');
+      const keyInput = document.getElementById('gemini-new-key');
+      const label = labelInput ? labelInput.value.trim() : '';
+      const key = keyInput ? keyInput.value.trim() : '';
       if (!key) return alert('Please enter a Gemini API Key');
+
+      const btn = document.getElementById('btn-add-gemini-key');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Adding...';
+      }
 
       try {
         const res = await fetch('/api/gemini/keys', {
@@ -1091,15 +1012,20 @@
         });
         const json = await res.json();
         if (json.success) {
-          document.getElementById('gemini-new-key').value = '';
-          document.getElementById('gemini-key-label').value = '';
+          if (keyInput) keyInput.value = '';
+          if (labelInput) labelInput.value = '';
           await saveGeminiProviderSettings();
           await loadGeminiSettings();
         } else {
-          alert('Error: ' + json.error);
+          alert('Error: ' + (json.error || 'Failed to add key'));
         }
       } catch (e) {
         alert('Failed to add key: ' + e.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-plus"></i> Add Key to Pool';
+        }
       }
     }
 
@@ -1114,8 +1040,10 @@
     }
 
     async function saveGeminiProviderSettings() {
-      const providerMode = document.getElementById('gemini-provider-mode').value;
-      const model = document.getElementById('gemini-model-select').value;
+      const modeEl = document.getElementById('gemini-provider-mode');
+      const modelEl = document.getElementById('gemini-model-select');
+      const providerMode = modeEl ? modeEl.value : 'auto';
+      const model = modelEl ? modelEl.value : 'gemini-2.5-flash';
       try {
         await fetch('/api/gemini/settings', {
           method: 'POST',
@@ -1127,10 +1055,12 @@
       }
     }
 
-    document.getElementById('gemini-provider-mode')?.addEventListener('change', saveGeminiProviderSettings);
-    document.getElementById('gemini-model-select')?.addEventListener('change', saveGeminiProviderSettings);
-
-</script>
+    // Init
+    loadStats();
+    loadGeminiSettings();
+    setInterval(loadStats, 10000);
+  
+    </script>
 
   <!-- Telegram Login Modal -->
   <div id="auth-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -1221,103 +1151,7 @@
       } catch (e) { authStatus('Network error: ' + e.message, true); }
     }
   
-    // Gemini Settings & Multi-Key Pool
-    async function loadGeminiSettings() {
-      try {
-        const res = await fetch('/api/gemini/settings');
-        const json = await res.json();
-        if (json.success) {
-          const { providerMode, model, keys } = json.data;
-          document.getElementById('gemini-provider-mode').value = providerMode || 'auto';
-          document.getElementById('gemini-model-select').value = model || 'gemini-2.5-flash';
-
-          const badge = document.getElementById('gemini-status-badge');
-          if (keys && keys.length > 0) {
-            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700';
-            badge.innerText = `${keys.length} Active Key${keys.length > 1 ? 's' : ''}`;
-          } else {
-            badge.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700';
-            badge.innerText = 'No Keys Configured';
-          }
-
-          const container = document.getElementById('gemini-keys-list');
-          if (!keys || keys.length === 0) {
-            container.innerHTML = '<div class="text-xs text-slate-400 italic py-2">No Gemini API keys configured yet. Add one below.</div>';
-          } else {
-            container.innerHTML = keys.map(k => `
-              <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                <div class="flex items-center gap-3">
-                  <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
-                  <div>
-                    <div class="text-sm font-semibold text-slate-800">${k.label}</div>
-                    <div class="text-xs font-mono text-slate-500">${k.maskedKey}</div>
-                  </div>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button onclick="deleteGeminiKey('${k.id}')" class="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1">Delete</button>
-                </div>
-              </div>
-            `).join('');
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to load Gemini settings:', e);
-      }
-    }
-
-    async function addGeminiKey() {
-      const label = document.getElementById('gemini-key-label').value.trim();
-      const key = document.getElementById('gemini-new-key').value.trim();
-      if (!key) return alert('Please enter a Gemini API Key');
-
-      try {
-        const res = await fetch('/api/gemini/keys', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ label, key })
-        });
-        const json = await res.json();
-        if (json.success) {
-          document.getElementById('gemini-new-key').value = '';
-          document.getElementById('gemini-key-label').value = '';
-          await saveGeminiProviderSettings();
-          await loadGeminiSettings();
-        } else {
-          alert('Error: ' + json.error);
-        }
-      } catch (e) {
-        alert('Failed to add key: ' + e.message);
-      }
-    }
-
-    async function deleteGeminiKey(id) {
-      if (!confirm('Are you sure you want to remove this Gemini API key from the pool?')) return;
-      try {
-        await fetch(`/api/gemini/keys/${id}`, { method: 'DELETE' });
-        await loadGeminiSettings();
-      } catch (e) {
-        alert('Failed to delete key: ' + e.message);
-      }
-    }
-
-    async function saveGeminiProviderSettings() {
-      const providerMode = document.getElementById('gemini-provider-mode').value;
-      const model = document.getElementById('gemini-model-select').value;
-      try {
-        await fetch('/api/gemini/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ providerMode, model })
-        });
-      } catch (e) {
-        console.warn('Failed to save provider mode/model:', e);
-      }
-    }
-
-    document.getElementById('gemini-provider-mode')?.addEventListener('change', saveGeminiProviderSettings);
-    document.getElementById('gemini-model-select')?.addEventListener('change', saveGeminiProviderSettings);
-
-</script>
+    </script>
 
 
   <!-- Knowledge Add Modal -->
