@@ -102,6 +102,12 @@ async function getLiveSettings() {
 
 
 
+function normalizeId(id: any): string {
+  if (id === null || id === undefined) return '';
+  const str = typeof id === 'object' && id.toString ? id.toString() : String(id);
+  return str.replace(/[^0-9-]/g, '');
+}
+
 interface AdminCacheEntry {
   adminIds: Set<string>;
   expiresAt: number;
@@ -114,17 +120,19 @@ async function isSenderAdminInChat(
   chatId: string,
   senderId: string
 ): Promise<boolean> {
-  if (!chatId || !senderId) return false;
+  const normChatId = normalizeId(chatId);
+  const normSenderId = normalizeId(senderId);
+  if (!normChatId || !normSenderId) return false;
 
   // In Telegram supergroups, an admin posting anonymously has senderId === chatId
-  if (senderId === chatId) {
+  if (normSenderId === normChatId) {
     return true;
   }
 
   const now = Date.now();
-  const cached = groupAdminCache.get(chatId);
+  const cached = groupAdminCache.get(normChatId);
   if (cached && cached.expiresAt > now) {
-    return cached.adminIds.has(senderId);
+    return cached.adminIds.has(normSenderId);
   }
 
   const adminIds = new Set<string>();
@@ -137,8 +145,9 @@ async function isSenderAdminInChat(
       });
       if (Array.isArray(admins)) {
         for (const admin of admins) {
-          if (admin?.id) {
-            adminIds.add(admin.id.toString());
+          const normId = normalizeId(admin?.id);
+          if (normId) {
+            adminIds.add(normId);
           }
         }
       }
@@ -151,7 +160,10 @@ async function isSenderAdminInChat(
         const participants = fullChat?.fullChat?.participants?.participants || [];
         for (const p of participants) {
           if (p.className === 'ChatParticipantAdmin' || p.className === 'ChatParticipantCreator') {
-            adminIds.add(p.userId.toString());
+            const normId = normalizeId(p.userId);
+            if (normId) {
+              adminIds.add(normId);
+            }
           }
         }
       }
@@ -160,12 +172,12 @@ async function isSenderAdminInChat(
     }
   }
 
-  groupAdminCache.set(chatId, {
+  groupAdminCache.set(normChatId, {
     adminIds,
     expiresAt: now + 5 * 60 * 1000,
   });
 
-  return adminIds.has(senderId);
+  return adminIds.has(normSenderId);
 }
 
 let activeClient: TelegramClient | null = null;
@@ -237,8 +249,8 @@ export async function startWorker(forcedSession?: string) {
     // Filter out our own sent messages from triggering replies
     if (msg.out) return;
 
-    const chatId = msg.chatId?.toString() || '';
-    const senderId = msg.senderId?.toString() || '';
+    const chatId = normalizeId(msg.chatId);
+    const senderId = normalizeId(msg.senderId);
     const isPrivate = msg.isPrivate;
     const isGroup = msg.isGroup;
     const isChannel = msg.isChannel;
