@@ -37,15 +37,23 @@ async function getLiveSettings() {
     }
     const mode = (map.get('operating_mode') as OperatingMode) || (process.env.OPERATING_MODE as OperatingMode) || 'auto_pilot';
     const killSwitch = map.get('emergency_kill_switch') === 'true';
+    const allowedGroupIds = (map.get('allowed_group_ids') || process.env.ALLOWED_GROUP_IDS || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    const blockedUserIds = (map.get('blocked_user_ids') || process.env.BLOCKED_USER_IDS || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
     return {
       operatingMode: mode,
       emergencyKillSwitch: killSwitch,
+      allowedGroupIds,
+      blockedUserIds,
     };
   } catch (e: any) {
     console.warn('Could not read system_settings from DB, using fallback defaults:', e.message);
     return {
       operatingMode: (process.env.OPERATING_MODE as OperatingMode) || 'auto_pilot',
       emergencyKillSwitch: false,
+      allowedGroupIds: (process.env.ALLOWED_GROUP_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
+      blockedUserIds: (process.env.BLOCKED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean),
     };
   }
 }
@@ -142,11 +150,12 @@ async function main() {
       return;
     }
 
-    // Download photo buffer if present for Bedrock Nova Vision analysis
+    // Download photo buffer if present for Bedrock Nova Vision analysis (ignore link previews / webpages)
     let mediaBuffer: Buffer | undefined;
     let mediaMimeType: string | undefined;
 
-    if (msg.media) {
+    const isActualPhoto = !!(msg.photo || (msg.media && (msg.media as any).className === 'MessageMediaPhoto'));
+    if (isActualPhoto && msg.media) {
       try {
         const buffer = await client.downloadMedia(msg.media);
         if (buffer && Buffer.isBuffer(buffer)) {
@@ -158,22 +167,34 @@ async function main() {
       }
     }
 
-    const decision = await brain.processMessage(
-      {
-        messageId: msg.id,
+    let decision: any;
+    try {
+      decision = await brain.processMessage(
+        {
+          messageId: msg.id,
+          chatId,
+          senderId,
+          isPrivateChat: !!isPrivate,
+          isGroup: !!isGroup,
+          isChannel: !!isChannel,
+          text: msg.text,
+          mediaBuffer,
+          mediaMimeType,
+          timestamp: msg.date,
+        },
+        [],
+        settings.operatingMode
+      );
+    } catch (brainErr: any) {
+      console.error('[Brain Error]:', brainErr);
+      await db.insert(auditLogs).values({
+        eventType: 'error',
         chatId,
-        senderId,
-        isPrivateChat: !!isPrivate,
-        isGroup: !!isGroup,
-        isChannel: !!isChannel,
-        text: msg.text,
-        mediaBuffer,
-        mediaMimeType,
-        timestamp: msg.date,
-      },
-      [], // recent history
-      settings.operatingMode
-    );
+        actionTaken: ,
+        details: { stack: brainErr.stack?.slice(0, 300), name: brainErr.name },
+      });
+      return;
+    }
 
     console.log(`[Decision] Mode: ${settings.operatingMode} | Action: ${decision.action} | Reason: ${decision.reason}`);
 
