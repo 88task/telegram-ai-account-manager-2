@@ -45,6 +45,9 @@ test('Telegram event -> SQL -> brain -> reply/approval flows with provider stubs
   const { startWorker, stopWorker } = require('../../packages/worker/dist/index.js');
   t.after(() => stopWorker());
   await data.initDb();
+  // Reproduce an existing production table that was created without chat uniqueness.
+  await data.pool.query('ALTER TABLE conversations DROP CONSTRAINT conversations_chat_id_key');
+  await data.initDb();
   await startWorker(session.save());
   assert.equal(typeof handler, 'function');
   const setting = (key, value) => data.db.insert(data.systemSettings).values({ key, value }).onConflictDoUpdate({ target: data.systemSettings.key, set: { value } });

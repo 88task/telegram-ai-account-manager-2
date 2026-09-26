@@ -134,6 +134,14 @@ initial deduplication takes a table lock. The unique index is also declared in t
 Drizzle schema. `db:push` builds the database package and runs the same initialization/cleanup
 before applying the Drizzle schema, including on databases containing duplicates.
 
+For legacy conversation tables, startup also restores unique `chat_id` enforcement.
+If duplicates exist, the most recent conversation metadata stays live; unanswered and
+human-review flags are retained if any duplicate had them set. Removed rows, including
+legacy columns, are preserved in `conversations_duplicate_archive.original_row`.
+This repair runs in the same locked transaction as the other migrations. Startup
+validates both incoming-message conflict targets before allowing the worker to run.
+
+
 
 ### Required security and delivery configuration
 

@@ -57,6 +57,13 @@ export const messageDuplicateArchive = pgTable('messages_duplicate_archive', {
   originalRow: jsonb('original_row').notNull(),
 });
 
+// Preserve legacy conversation rows removed when restoring chat uniqueness.
+export const conversationDuplicateArchive = pgTable('conversations_duplicate_archive', {
+  archiveId: bigserial('archive_id', { mode: 'number' }).primaryKey(),
+  archivedAt: timestamp('archived_at').defaultNow().notNull(),
+  originalRow: jsonb('original_row').notNull(),
+});
+
 export const approvalQueue = pgTable('approval_queue', {
   id: serial('id').primaryKey(),
   chatId: text('chat_id').notNull(),
