@@ -6,20 +6,28 @@ export class TelegramSender {
 
   /**
    * Sends a message with realistic typing simulation and anti-burst delays.
-   * target can be an InputPeer, Entity, or string chat_id.
+   * target can be a GramJS Message object, InputPeer, or string chat_id.
    */
   public async sendReply(target: any, text: string): Promise<number | undefined> {
     try {
-      let peer = target;
-      try {
-        if (typeof target === 'string') {
-          peer = await this.client.getInputEntity(target);
+      let peer: any = target;
+
+      // If target is a GramJS Message object with async getInputChat()
+      if (target && typeof target.getInputChat === 'function') {
+        try {
+          peer = await target.getInputChat();
+        } catch {
+          peer = target;
         }
-      } catch (e) {
-        peer = target;
+      } else if (typeof target === 'string') {
+        try {
+          peer = await this.client.getInputEntity(target);
+        } catch {
+          peer = target;
+        }
       }
 
-      // 1. Simulate human typing state (non-fatal if SetTyping fails)
+      // 1. Simulate human typing state (safe try/catch)
       try {
         await this.client.invoke(
           new Api.messages.SetTyping({
@@ -34,11 +42,20 @@ export class TelegramSender {
       // Short human delay (1-2 seconds)
       await new Promise(r => setTimeout(r, 1500));
 
+      // 2. If target is a Message instance with respond(), use it directly
+      if (target && typeof target.respond === 'function') {
+        const result = await target.respond({
+          message: text,
+        });
+        return result?.id;
+      }
+
+      // Fallback: send via client using resolved peer
       const result = await this.client.sendMessage(peer, {
         message: text,
       });
 
-      return result.id;
+      return result?.id;
     } catch (err) {
       console.error(`Failed to send message:`, err);
       throw err;
