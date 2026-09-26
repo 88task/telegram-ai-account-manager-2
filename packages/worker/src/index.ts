@@ -202,6 +202,7 @@ export async function startWorker(forcedSession?: string) {
       } else {
         await db.insert(conversations).values({
           chatId,
+          accountKey: 'default',
           chatTitle: senderId,
           chatType: isPrivate ? 'private' : isGroup ? 'group' : 'channel',
           lastMessageText: msg.text || '[Media]',
