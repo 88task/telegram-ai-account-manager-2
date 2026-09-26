@@ -1,6 +1,7 @@
 {
   "name": "telegram-ai-account-manager",
   "private": true,
+  "packageManager": "pnpm@9.15.0",
   "workspaces": [
     "packages/*"
   ],

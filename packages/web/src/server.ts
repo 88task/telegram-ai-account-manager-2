@@ -421,7 +421,34 @@ app.get('/api/audit-logs', async (req: Request, res: Response) => {
 
 
 // ---------- In-panel Telegram MTProto login ----------
-const pendingLogins = new Map<string, { client: TelegramClient; phone: string; phoneCodeHash: string }>();
+const pendingLogins = new Map<string, { client: TelegramClient; phone: string; phoneCodeHash: string; createdAt: number }>();
+
+function cleanupPendingLogin(phone: string) {
+  const pending = pendingLogins.get(phone);
+  if (!pending) return;
+  try {
+    void pending.client.disconnect();
+  } catch {}
+  try {
+    void pending.client.destroy();
+  } catch {}
+  pendingLogins.delete(phone);
+}
+
+function cleanupExpiredPendingLogins() {
+  const now = Date.now();
+  for (const [phone, pending] of pendingLogins.entries()) {
+    if (now - pending.createdAt > 10 * 60 * 1000) {
+      try {
+        void pending.client.disconnect();
+      } catch {}
+      try {
+        void pending.client.destroy();
+      } catch {}
+      pendingLogins.delete(phone);
+    }
+  }
+}
 
 function getEncryptionKey(): Buffer | null {
   const keyHex = (process.env.SESSION_ENCRYPTION_KEY || '').trim();
@@ -461,13 +488,12 @@ app.post('/api/auth/send-code', async (req: Request, res: Response) => {
       return res.status(500).json({ success: false, error: 'TELEGRAM_API_ID / TELEGRAM_API_HASH are not configured on the web task' });
     }
     // Drop any previous pending login for this phone
-    const previous = pendingLogins.get(phone);
-    if (previous) { try { await previous.client.disconnect(); } catch {} pendingLogins.delete(phone); }
+    cleanupPendingLogin(phone);
 
     const client = new TelegramClient(new StringSession(''), apiId, apiHash, { connectionRetries: 5 });
     await client.connect();
     const result = await client.sendCode({ apiId, apiHash }, phone);
-    pendingLogins.set(phone, { client, phone, phoneCodeHash: (result as any).phoneCodeHash });
+    pendingLogins.set(phone, { client, phone, phoneCodeHash: (result as any).phoneCodeHash, createdAt: Date.now() });
     res.json({ success: true, message: 'Login code sent to your Telegram app' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.errorMessage || error.message });
@@ -554,13 +580,12 @@ initDb()
   .then(() => {
     app.listen(port, () => {
       console.log(`Telegram AI Management Panel listening at http://localhost:${port}`);
+      setInterval(cleanupExpiredPendingLogins, 60_000);
       // Boot co-located worker inside web process
       startWorker().catch((err) => console.error('[Web] Error booting worker:', err));
     });
   })
   .catch((err) => {
     console.error('Failed to initialize database tables:', err);
-    app.listen(port, () => {
-      console.log(`Telegram AI Management Panel listening at http://localhost:${port} (db init failed)`);
-    });
+    process.exit(1);
   });

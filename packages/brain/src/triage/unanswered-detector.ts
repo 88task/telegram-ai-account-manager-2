@@ -9,14 +9,12 @@ export class UnansweredDetector {
     recentHistory: Array<{ text?: string; isOutgoing: boolean; timestamp: number }>,
     myUserId: string
   ): TriageResult {
-    // If the latest message was sent by the account owner, no response needed
-    const lastMessage = recentHistory.length > 0 ? recentHistory[recentHistory.length - 1] : null;
-    const lastByMe = currentMessage.senderId === myUserId || (lastMessage ? lastMessage.isOutgoing : false);
-
-    if (lastByMe) {
+    // The current message itself is the decisive signal. Do not suppress a fresh inbound user message
+    // simply because an earlier message in history was sent by us.
+    if (currentMessage.senderId === myUserId) {
       return {
         replyRequired: false,
-        reason: 'The latest message in the conversation was sent by you.',
+        reason: 'This message was sent by the account owner and does not require a reply.',
         lastMessageByMe: true,
         isConversationClosed: false,
         urgency: 'low'

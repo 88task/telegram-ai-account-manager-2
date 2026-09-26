@@ -13,6 +13,22 @@ export class TelegramSender {
     try {
       let peer: any = target;
 
+      const getChatIdValue = (obj: any): string => {
+        const candidates = [obj?.chatId, obj?.chat?.id, obj?.peerId, obj?.id, obj?.senderId];
+        for (const value of candidates) {
+          if (value === null || value === undefined || value === '') continue;
+          const str = typeof value === 'string' ? value : String(value);
+          const normalized = str.replace(/[^0-9-]/g, '');
+          if (normalized) return normalized;
+        }
+        return '';
+      };
+
+      const targetChatId = getChatIdValue(target);
+      const numericChatId = targetChatId ? Number(targetChatId) : NaN;
+      const isPrivateChat = !!targetChatId && Number.isFinite(numericChatId) && numericChatId > 0;
+      const isGroupLikeChat = !!targetChatId && Number.isFinite(numericChatId) && numericChatId < 0;
+
       // If target is a GramJS Message object with async getInputChat()
       if (target && typeof target.getInputChat === 'function') {
         try {
@@ -45,8 +61,9 @@ export class TelegramSender {
 
       let messageText = text;
 
-      // Tag/mention the user in group chats so they receive direct notification
-      if (target && !target.isPrivate && (target.isGroup || target.isChannel)) {
+      // Tag/mention the user in group chats so they receive direct notification.
+      // Use numeric chat ID semantics instead of brittle boolean flags.
+      if (target && !isPrivateChat && (isGroupLikeChat || target.isGroup || target.isChannel)) {
         try {
           let mentionTag = '';
           const sender = typeof target.getSender === 'function' ? await target.getSender() : null;

@@ -211,6 +211,8 @@ export async function startWorker(forcedSession?: string) {
             text: msg.text || '',
             isOutgoing: false,
             mediaType: msg.media ? 'image' : null,
+          }).onConflictDoNothing({
+            target: [messages.chatId, messages.telegramMessageId],
           });
 
           const [existingConv] = await db.select().from(conversations).where(eq(conversations.chatId, chatId)).limit(1);
