@@ -17,6 +17,38 @@ function decryptSessionString(stored: string): string {
   return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
 }
 
+function decryptGeminiKeys(stored: string): string[] {
+  if (!stored) {
+    const fallback = (process.env.GEMINI_API_KEY || '').trim();
+    return fallback ? [fallback] : [];
+  }
+  let parsed: any[] = [];
+  if (!stored.startsWith('enc:')) {
+    try { parsed = JSON.parse(stored); } catch { parsed = []; }
+  } else {
+    try {
+      const [, ivHex, tagHex, dataHex] = stored.split(':');
+      const keyHex = (process.env.SESSION_ENCRYPTION_KEY || '').trim();
+      if (keyHex) {
+        const decipher = crypto.createDecipheriv('aes-256-gcm', Buffer.from(keyHex, 'hex'), Buffer.from(ivHex, 'hex'));
+        decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+        const dec = Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
+        parsed = JSON.parse(dec);
+      }
+    } catch (e: any) {
+      console.warn('Failed to decrypt gemini keys:', e.message);
+      parsed = [];
+    }
+  }
+  const extracted = (Array.isArray(parsed) ? parsed : [])
+    .map((k: any) => (typeof k === 'string' ? k : k?.key))
+    .filter((k: any): k is string => Boolean(k && typeof k === 'string'));
+  if (extracted.length === 0 && process.env.GEMINI_API_KEY) {
+    extracted.push(process.env.GEMINI_API_KEY.trim());
+  }
+  return extracted;
+}
+
 async function getSessionStringFromDb(): Promise<string> {
   try {
     const [row] = await db.select().from(telegramSessions).where(eq(telegramSessions.isActive, true)).limit(1);
@@ -41,11 +73,18 @@ async function getLiveSettings() {
       .split(',').map(s => s.trim()).filter(Boolean);
     const blockedUserIds = (map.get('blocked_user_ids') || process.env.BLOCKED_USER_IDS || '')
       .split(',').map(s => s.trim()).filter(Boolean);
+    const geminiMode = (map.get('ai_provider_mode') || process.env.AI_PROVIDER_MODE || 'auto') as 'auto' | 'gemini' | 'bedrock';
+    const geminiModel = map.get('gemini_model') || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    const geminiKeys = decryptGeminiKeys(map.get('gemini_keys_encrypted') || '');
+
     return {
       operatingMode: mode,
       emergencyKillSwitch: killSwitch,
       allowedGroupIds,
       blockedUserIds,
+      geminiKeys,
+      geminiModel,
+      geminiMode,
     };
   } catch (e: any) {
     console.warn('Could not read system_settings from DB, using fallback defaults:', e.message);
