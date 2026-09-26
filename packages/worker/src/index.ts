@@ -114,245 +114,251 @@ function normalizeId(id: any): string {
 
 let activeClient: TelegramClient | null = null;
 let isStarting = false;
+let workerStartupPromise: Promise<void> | null = null;
 
 export async function stopWorker() {
-  if (activeClient) {
-    console.log('[Worker] Stopping and destroying active TelegramClient...');
-    try {
-      await activeClient.disconnect();
-      await activeClient.destroy();
-    } catch (err: any) {
-      console.warn('[Worker] Error during client disconnect/destroy:', err.message);
-    }
-    activeClient = null;
+  if (!activeClient) {
+    return;
+  }
+
+  const client = activeClient;
+  activeClient = null;
+  console.log('[Worker] Stopping and destroying active TelegramClient...');
+  try {
+    await client.disconnect();
+  } catch (err: any) {
+    console.warn('[Worker] Error during client disconnect:', err.message);
+  }
+
+  try {
+    await client.destroy();
+  } catch (err: any) {
+    console.warn('[Worker] Error during client destroy:', err.message);
   }
 }
 
 export async function startWorker(forcedSession?: string) {
+  if (workerStartupPromise) {
+    await workerStartupPromise;
+    return;
+  }
+
   if (isStarting) {
     console.log('[Worker] startWorker already in progress, skipping.');
     return;
   }
+
   isStarting = true;
-
-  try {
-    await stopWorker();
-
-    const apiId = parseInt(process.env.TELEGRAM_API_ID || '', 10);
-    const apiHash = process.env.TELEGRAM_API_HASH || '';
-
-    if (!apiId || !apiHash) {
-      console.warn('[Worker] Missing TELEGRAM_API_ID or TELEGRAM_API_HASH.');
-      return;
-    }
-
-    let sessionString = forcedSession || process.env.TELEGRAM_SESSION_STRING || '';
-    if (!sessionString) {
-      sessionString = await getSessionStringFromDb();
-    }
-
-    if (!sessionString) {
-      console.log('[Worker] No Telegram session yet. Waiting for panel login...');
-      return;
-    }
-
-    console.log('[Worker] Connecting to Telegram MTProto socket...');
-    const client = new TelegramClient(new StringSession(sessionString), apiId, apiHash, {
-      connectionRetries: 5,
-    });
-
-    await client.connect();
-    console.log('[Worker] Connected to Telegram MTProto socket.');
-
-    const me = await client.getMe();
-    const myUserId = me.id.toString();
-    console.log(`[Worker] Authenticated as: ${me.firstName} (ID: ${myUserId})`);
-
-    activeClient = client;
-
-    const brain = new BrainPipeline(myUserId);
-    const sender = new TelegramSender(client);
-
-    client.addEventHandler(async (event) => {
-
-    const msg = event.message;
-    if (!msg) return;
-
-    // Filter out our own sent messages from triggering replies
-    if (msg.out) return;
-
-    const chatId = normalizeId(msg.chatId);
-    const senderId = normalizeId(msg.senderId);
-    const isPrivate = msg.isPrivate;
-    const isGroup = msg.isGroup;
-    const isChannel = msg.isChannel;
-
-    console.log(`[New Message] Chat: ${chatId} | Sender: ${senderId} | Text: "${msg.text?.slice(0, 50)}..."`);
-
-    // Record incoming message in DB
+  workerStartupPromise = (async () => {
     try {
-      await db.insert(messages).values({
-        telegramMessageId: msg.id,
-        chatId,
-        senderId,
-        text: msg.text || '',
-        isOutgoing: false,
-        mediaType: msg.media ? 'image' : null,
+      await stopWorker();
+
+      const apiId = parseInt(process.env.TELEGRAM_API_ID || '', 10);
+      const apiHash = process.env.TELEGRAM_API_HASH || '';
+
+      if (!apiId || !apiHash) {
+        console.warn('[Worker] Missing TELEGRAM_API_ID or TELEGRAM_API_HASH.');
+        return;
+      }
+
+      let sessionString = forcedSession || process.env.TELEGRAM_SESSION_STRING || '';
+      if (!sessionString) {
+        sessionString = await getSessionStringFromDb();
+      }
+
+      if (!sessionString) {
+        console.log('[Worker] No Telegram session yet. Waiting for panel login...');
+        return;
+      }
+
+      console.log('[Worker] Connecting to Telegram MTProto socket...');
+      const client = new TelegramClient(new StringSession(sessionString), apiId, apiHash, {
+        connectionRetries: 5,
       });
 
-      // Upsert conversation summary
-      const [existingConv] = await db.select().from(conversations).where(eq(conversations.chatId, chatId)).limit(1);
-      if (existingConv) {
-        await db.update(conversations)
-          .set({
-            lastMessageText: msg.text || '[Media]',
-            lastMessageAt: new Date(),
-            unanswered: true,
-          })
-          .where(eq(conversations.chatId, chatId));
-      } else {
-        await db.insert(conversations).values({
-          chatId,
-          accountKey: 'default',
-          chatTitle: senderId,
-          chatType: isPrivate ? 'private' : isGroup ? 'group' : 'channel',
-          lastMessageText: msg.text || '[Media]',
-          lastMessageAt: new Date(),
-          unanswered: true,
-        });
-      }
-    } catch (dbErr: any) {
-      console.warn('Could not record incoming message in DB:', dbErr.message);
-    }
+      await client.connect();
+      console.log('[Worker] Connected to Telegram MTProto socket.');
 
-    // Check live settings from DB (Kill switch & Mode)
-    const settings = await getLiveSettings();
-    brain.updateScope(settings.allowedGroupIds, settings.blockedUserIds, settings.ignoredAdminIds);
-    brain.setGeminiConfig(settings.geminiKeys || [], settings.geminiModel, settings.geminiMode);
-    if (settings.emergencyKillSwitch) {
-      console.log(`[Kill Switch Active] Skipping AI reply for chat ${chatId}.`);
-      return;
-    }
+      const me = await client.getMe();
+      const myUserId = me.id.toString();
+      console.log(`[Worker] Authenticated as: ${me.firstName} (ID: ${myUserId})`);
 
-    // Download photo buffer if present for Bedrock Nova Vision analysis (ignore link previews / webpages)
-    let mediaBuffer: Buffer | undefined;
-    let mediaMimeType: string | undefined;
+      activeClient = client;
 
-    const isActualPhoto = !!(msg.photo || (msg.media && (msg.media as any).className === 'MessageMediaPhoto'));
-    if (isActualPhoto && msg.media) {
-      try {
-        const buffer = await client.downloadMedia(msg.media);
-        if (buffer && Buffer.isBuffer(buffer)) {
-          mediaBuffer = buffer;
-          mediaMimeType = 'image/jpeg';
+      const brain = new BrainPipeline(myUserId);
+      const sender = new TelegramSender(client);
+
+      client.addEventHandler(async (event) => {
+        const msg = event.message;
+        if (!msg) return;
+
+        if (msg.out) return;
+
+        const chatId = normalizeId(msg.chatId);
+        const senderId = normalizeId(msg.senderId);
+        const isPrivate = msg.isPrivate;
+        const isGroup = msg.isGroup;
+        const isChannel = msg.isChannel;
+
+        console.log(`[New Message] Chat: ${chatId} | Sender: ${senderId} | Text: "${msg.text?.slice(0, 50)}..."`);
+
+        try {
+          await db.insert(messages).values({
+            telegramMessageId: msg.id,
+            chatId,
+            senderId,
+            text: msg.text || '',
+            isOutgoing: false,
+            mediaType: msg.media ? 'image' : null,
+          });
+
+          const [existingConv] = await db.select().from(conversations).where(eq(conversations.chatId, chatId)).limit(1);
+          if (existingConv) {
+            await db.update(conversations)
+              .set({
+                lastMessageText: msg.text || '[Media]',
+                lastMessageAt: new Date(),
+                unanswered: true,
+              })
+              .where(eq(conversations.chatId, chatId));
+          } else {
+            await db.insert(conversations).values({
+              chatId,
+              accountKey: 'default',
+              chatTitle: senderId,
+              chatType: isPrivate ? 'private' : isGroup ? 'group' : 'channel',
+              lastMessageText: msg.text || '[Media]',
+              lastMessageAt: new Date(),
+              unanswered: true,
+            });
+          }
+        } catch (dbErr: any) {
+          console.warn('Could not record incoming message in DB:', dbErr.message);
         }
-      } catch (err) {
-        console.warn('Could not download media attachment:', err);
-      }
+
+        const settings = await getLiveSettings();
+        brain.updateScope(settings.allowedGroupIds, settings.blockedUserIds, settings.ignoredAdminIds);
+        brain.setGeminiConfig(settings.geminiKeys || [], settings.geminiModel, settings.geminiMode);
+        if (settings.emergencyKillSwitch) {
+          console.log(`[Kill Switch Active] Skipping AI reply for chat ${chatId}.`);
+          return;
+        }
+
+        let mediaBuffer: Buffer | undefined;
+        let mediaMimeType: string | undefined;
+
+        const isActualPhoto = !!(msg.photo || (msg.media && (msg.media as any).className === 'MessageMediaPhoto'));
+        if (isActualPhoto && msg.media) {
+          try {
+            const buffer = await client.downloadMedia(msg.media);
+            if (buffer && Buffer.isBuffer(buffer)) {
+              mediaBuffer = buffer;
+              mediaMimeType = 'image/jpeg';
+            }
+          } catch (err) {
+            console.warn('Could not download media attachment:', err);
+          }
+        }
+
+        let isSenderAdmin = false;
+        if (!isPrivate) {
+          if (senderId && senderId === chatId) {
+            isSenderAdmin = true;
+            console.log(`[worker] Ignored message from anonymous admin (senderId === chatId ${chatId})`);
+          } else if (settings.ignoredAdminIds.includes(senderId)) {
+            isSenderAdmin = true;
+            console.log(`[worker] Ignored message from configured admin ID (${senderId}) in chat (${chatId})`);
+          }
+        }
+
+        let decision: any;
+        try {
+          decision = await brain.processMessage(
+            {
+              messageId: msg.id,
+              chatId,
+              senderId,
+              isPrivateChat: !!isPrivate,
+              isGroup: !!isGroup,
+              isChannel: !!isChannel,
+              isSenderAdmin,
+              text: msg.text,
+              mediaBuffer,
+              mediaMimeType,
+              timestamp: msg.date,
+            },
+            [],
+            settings.operatingMode
+          );
+        } catch (brainErr: any) {
+          console.error('[Brain Error]:', brainErr);
+          await db.insert(auditLogs).values({
+            eventType: 'error',
+            chatId,
+            actionTaken: brainErr?.message || 'AI processing failure',
+            details: { stack: brainErr.stack?.slice(0, 300), name: brainErr.name },
+          });
+          return;
+        }
+
+        console.log(`[Decision] Mode: ${settings.operatingMode} | Action: ${decision.action} | Reason: ${decision.reason}`);
+
+        try {
+          await db.insert(auditLogs).values({
+            eventType: decision.action,
+            chatId,
+            actionTaken: decision.reason || 'AI evaluation completed',
+            details: { confidence: decision.confidence, replyPreview: decision.replyText?.slice(0, 100) },
+          });
+        } catch (e: any) {
+          // ignore audit log failure
+        }
+
+        if (decision.action === 'approval_required') {
+          try {
+            await db.insert(approvalQueue).values({
+              chatId,
+              incomingMessageId: msg.id,
+              suggestedReply: decision.replyText || '[Human response required]',
+              aiConfidence: decision.confidence ?? 0.5,
+              aiReasoning: decision.reason || 'Flagged for human moderation',
+              status: 'pending',
+            });
+            await db.update(conversations)
+              .set({ requiresHumanReview: true, unanswered: true })
+              .where(eq(conversations.chatId, chatId));
+            console.log();
+          } catch (err: any) {
+            console.error('Failed to insert into approval_queue:', err);
+          }
+        }
+
+        if (decision.action === 'auto_sent' && decision.replyText) {
+          console.log(`[Auto-Pilot] Sending reply to ${chatId}: "${decision.replyText}"`);
+          await sender.sendReply(msg, decision.replyText);
+
+          try {
+            await db.update(conversations)
+              .set({ unanswered: false })
+              .where(eq(conversations.chatId, chatId));
+          } catch (e) {
+            // ignore
+          }
+        }
+      }, new NewMessage({}));
+
+      console.log('Telegram AI Account Worker is listening for incoming private messages...');
+    } catch (err: any) {
+      console.error('[Worker] Failed to start worker:', err);
+    } finally {
+      isStarting = false;
+      workerStartupPromise = null;
     }
+  })();
 
-    // Explicit admin skip: no dynamic Telegram lookup.
-    // 1) Telegram anonymous admins post with senderId === chatId.
-    // 2) IDs configured in ignored_admin_ids are skipped (reply will skip them).
-    let isSenderAdmin = false;
-    if (!isPrivate) {
-      if (senderId && senderId === chatId) {
-        isSenderAdmin = true;
-        console.log(`[worker] Ignored message from anonymous admin (senderId === chatId ${chatId})`);
-      } else if (settings.ignoredAdminIds.includes(senderId)) {
-        isSenderAdmin = true;
-        console.log(`[worker] Ignored message from configured admin ID (${senderId}) in chat (${chatId})`);
-      }
-    }
-
-    let decision: any;
-    try {
-      decision = await brain.processMessage(
-        {
-          messageId: msg.id,
-          chatId,
-          senderId,
-          isPrivateChat: !!isPrivate,
-          isGroup: !!isGroup,
-          isChannel: !!isChannel,
-          isSenderAdmin,
-          text: msg.text,
-          mediaBuffer,
-          mediaMimeType,
-          timestamp: msg.date,
-        },
-        [],
-        settings.operatingMode
-      );
-    } catch (brainErr: any) {
-      console.error('[Brain Error]:', brainErr);
-      await db.insert(auditLogs).values({
-        eventType: 'error',
-        chatId,
-        actionTaken: brainErr?.message || "AI processing failure",
-        details: { stack: brainErr.stack?.slice(0, 300), name: brainErr.name },
-      });
-      return;
-    }
-
-    console.log(`[Decision] Mode: ${settings.operatingMode} | Action: ${decision.action} | Reason: ${decision.reason}`);
-
-    // Log decision to auditLogs
-    try {
-      await db.insert(auditLogs).values({
-        eventType: decision.action,
-        chatId,
-        actionTaken: decision.reason || 'AI evaluation completed',
-        details: { confidence: decision.confidence, replyPreview: decision.replyText?.slice(0, 100) },
-      });
-    } catch (e: any) {
-      // ignore audit log failure
-    }
-
-    if (decision.action === 'approval_required') {
-      try {
-        await db.insert(approvalQueue).values({
-          chatId,
-          incomingMessageId: msg.id,
-          suggestedReply: decision.replyText || '[Human response required]',
-          aiConfidence: decision.confidence ?? 0.5,
-          aiReasoning: decision.reason || 'Flagged for human moderation',
-          status: 'pending',
-        });
-        await db.update(conversations)
-          .set({ requiresHumanReview: true, unanswered: true })
-          .where(eq(conversations.chatId, chatId));
-        console.log();
-      } catch (err: any) {
-        console.error('Failed to insert into approval_queue:', err);
-      }
-    }
-
-    if (decision.action === 'auto_sent' && decision.replyText) {
-      console.log(`[Auto-Pilot] Sending reply to ${chatId}: "${decision.replyText}"`);
-      await sender.sendReply(msg, decision.replyText);
-
-      // Record outgoing message and mark conversation answered
-      try {
-        await db.update(conversations)
-          .set({ unanswered: false })
-          .where(eq(conversations.chatId, chatId));
-      } catch (e) {
-        // ignore
-      }
-    }
-  }, new NewMessage({}));
-
-  console.log('Telegram AI Account Worker is listening for incoming private messages...');
-  } catch (err: any) {
-    console.error('[Worker] Failed to start worker:', err);
-  } finally {
-    isStarting = false;
-  }
+  await workerStartupPromise;
 }
 
-
-// Standalone runner if executed directly
 if (process.env.STANDALONE_WORKER === 'true' || (typeof process !== 'undefined' && process.argv[1]?.endsWith('worker/dist/index.js'))) {
   startWorker().catch(console.error);
 }
