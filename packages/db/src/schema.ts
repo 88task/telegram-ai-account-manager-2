@@ -26,6 +26,7 @@ export const contacts = pgTable('contacts', {
 export const conversations = pgTable('conversations', {
   id: serial('id').primaryKey(),
   chatId: text('chat_id').notNull().unique(),
+  accountKey: text('account_key').default('default'),
   chatTitle: text('chat_title'),
   chatType: text('chat_type').default('private').notNull(), // 'private' | 'group'
   lastMessageText: text('last_message_text'),
