@@ -190,7 +190,7 @@ async function main() {
       await db.insert(auditLogs).values({
         eventType: 'error',
         chatId,
-        actionTaken: ,
+        actionTaken: brainErr?.message || "AI processing failure",
         details: { stack: brainErr.stack?.slice(0, 300), name: brainErr.name },
       });
       return;
