@@ -66,6 +66,12 @@
 
     <!-- Right Controls -->
     <div class="flex items-center gap-3">
+      <!-- Task Availability Toggle -->
+      <button onclick="toggleTaskAvailability()" id="task-availability-btn" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 transition-all hover:bg-emerald-500/20">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" id="task-availability-dot"></span>
+        <span id="task-availability-text">Tasks: AVAILABLE</span>
+      </button>
+
       <!-- Emergency Kill Switch -->
       <button onclick="toggleKillSwitch()" id="kill-switch-btn" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 transition-all hover:bg-emerald-500/20">
         <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" id="kill-switch-dot"></span>
@@ -241,7 +247,7 @@
 
     <!-- 4. GROUPS & CHAT BLOCKING VIEW -->
     <div id="view-scope" class="space-y-6 hidden">
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         <!-- Whitelisted Allowed Groups -->
         <div class="glass-card rounded-2xl p-6 border border-gray-800 space-y-4">
@@ -295,6 +301,31 @@
           </div>
         </div>
 
+        <!-- Ignored Admin IDs -->
+        <div class="glass-card rounded-2xl p-6 border border-gray-800 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-base font-bold text-white flex items-center gap-2">
+                <i class="fa-solid fa-user-shield text-amber-400"></i>
+                Ignored Admin IDs
+              </h3>
+              <p class="text-xs text-gray-400 mt-0.5">Messages from these Telegram admin IDs are skipped in groups without false replies.</p>
+            </div>
+          </div>
+
+          <div class="flex gap-2">
+            <input type="text" id="new-admin-id-input" placeholder="Telegram Admin ID (e.g. 1032532763)" class="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500">
+            <button onclick="addIgnoredAdmin()" class="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-medium">
+              <i class="fa-solid fa-plus mr-1"></i>Add Admin
+            </button>
+          </div>
+
+          <div class="border border-gray-800 rounded-xl overflow-hidden">
+            <div id="ignored-admins-list" class="divide-y divide-gray-800 text-xs">
+              <!-- Populated dynamically -->
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -533,6 +564,21 @@
         }
       });
 
+      // Task Availability Toggle
+      const taskBtn = document.getElementById('task-availability-btn');
+      const taskDot = document.getElementById('task-availability-dot');
+      const taskText = document.getElementById('task-availability-text');
+      const isTaskAvail = data.settings.taskAvailability !== false;
+      if (isTaskAvail) {
+        taskBtn.className = "px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all";
+        taskDot.className = "w-2 h-2 rounded-full bg-emerald-400 animate-pulse";
+        taskText.innerText = "Tasks: AVAILABLE";
+      } else {
+        taskBtn.className = "px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 transition-all";
+        taskDot.className = "w-2 h-2 rounded-full bg-amber-400";
+        taskText.innerText = "Tasks: UNAVAILABLE";
+      }
+
       // Kill Switch
       const killBtn = document.getElementById('kill-switch-btn');
       const killText = document.getElementById('kill-switch-text');
@@ -553,6 +599,16 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ operatingMode: mode })
+      });
+      loadStats();
+    }
+
+    async function toggleTaskAvailability() {
+      const current = globalStats?.settings?.taskAvailability !== false;
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskAvailability: !current })
       });
       loadStats();
     }
@@ -751,6 +807,26 @@
           userList.appendChild(row);
         });
       }
+
+      // Ignored admin IDs list
+      const adminList = document.getElementById('ignored-admins-list');
+      if (adminList) {
+        adminList.innerHTML = '';
+        const adminIds = settings.ignoredAdminIds || [];
+        if (adminIds.length === 0) {
+          adminList.innerHTML = `<div class="p-3 text-gray-500 text-xs">No admin IDs configured (only anonymous admins ignored)</div>`;
+        } else {
+          adminIds.forEach(id => {
+            const row = document.createElement('div');
+            row.className = 'p-3 flex items-center justify-between';
+            row.innerHTML = `
+              <span class="font-mono text-gray-300">${id}</span>
+              <button onclick="removeIgnoredAdmin('${id}')" class="text-rose-400 hover:text-rose-300 text-xs"><i class="fa-solid fa-trash"></i></button>
+            `;
+            adminList.appendChild(row);
+          });
+        }
+      }
     }
 
     async function addAllowedGroup() {
@@ -776,6 +852,33 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ allowedGroupIds: current })
+      });
+      loadStats();
+    }
+
+    async function addIgnoredAdmin() {
+      const input = document.getElementById('new-admin-id-input');
+      const val = input.value.trim();
+      if (!val) return;
+      const current = globalStats?.settings?.ignoredAdminIds || [];
+      if (!current.includes(val)) {
+        current.push(val);
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ignoredAdminIds: current })
+        });
+        input.value = '';
+        loadStats();
+      }
+    }
+
+    async function removeIgnoredAdmin(id) {
+      const current = (globalStats?.settings?.ignoredAdminIds || []).filter(a => a !== id);
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ignoredAdminIds: current })
       });
       loadStats();
     }
