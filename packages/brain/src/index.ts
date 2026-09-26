@@ -152,6 +152,10 @@ export class BrainPipeline {
     };
   }
 
+  public setGeminiConfig(keys: string[], model?: string, mode?: 'auto' | 'gemini' | 'bedrock'): void {
+    this.cognitiveOrchestrator.setGeminiConfig(keys, model, mode);
+  }
+
   public updateScope(allowedGroups: string[], blockedUsers: string[]): void {
     this.scopeFilter.updateAllowedGroups(allowedGroups);
     this.scopeFilter.updateBlockedUsers(blockedUsers);
