@@ -303,8 +303,7 @@ export async function startWorker(forcedSession?: string) {
 
     if (decision.action === 'auto_sent' && decision.replyText) {
       console.log(`[Auto-Pilot] Sending reply to ${chatId}: "${decision.replyText}"`);
-      const targetPeer = msg.inputChat || chatId;
-      await sender.sendReply(targetPeer, decision.replyText);
+      await sender.sendReply(msg, decision.replyText);
 
       // Record outgoing message and mark conversation answered
       try {
