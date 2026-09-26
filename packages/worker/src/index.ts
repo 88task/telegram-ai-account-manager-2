@@ -156,7 +156,7 @@ async function isSenderAdminInChat(
         }
       }
     } catch (fallbackErr: any) {
-      console.warn(, fallbackErr.message);
+      console.warn('[worker] Failed to fetch participants fallback:', fallbackErr.message);
     }
   }
 
@@ -312,10 +312,10 @@ export async function startWorker(forcedSession?: string) {
       try {
         isSenderAdmin = await isSenderAdminInChat(client, msg, chatId, senderId);
         if (isSenderAdmin) {
-          console.log();
+          console.log(`[worker] Ignored message from admin (${senderId}) in chat (${chatId})`);
         }
       } catch (err: any) {
-        console.warn(, err.message);
+        console.warn('[worker] Failed to check admin status:', err.message);
       }
     }
 
