@@ -1,3 +1,4 @@
+import { knowledgeQueries } from './triage/contextual-reply.js';
 import { ScopeFilter } from './filters/scope-filter.js';
 import { UnansweredDetector } from './triage/unanswered-detector.js';
 import { SafetyGuardrails } from './safety/guardrails.js';
@@ -117,11 +118,8 @@ export class BrainPipeline {
     const safety = this.safetyGuardrails.evaluate(incoming, conversationText);
 
     // 7. Context & Dynamic Few-Shot Memory Assembly
-    const memory = await this.contextBuilder.buildContextForContact(incoming.senderId, []);
-    const dynamicExemplars = await this.feedbackLearner.getDynamicExemplars(3);
-    if (dynamicExemplars.length > 0) {
-      memory.approvedExamples.unshift(...dynamicExemplars);
-    }
+    const memory = await this.contextBuilder.buildContextForContact(incoming.senderId, knowledgeQueries(incoming.text || '', recentHistory));
+    // Relevant approved corrections are retrieved by ContextBuilder alongside FAQ rules.
 
     // 8. Cognitive Orchestrator Execution (Perceive -> Synthesize -> Self-Critique)
     const formattedHistory = recentHistory.map(m => ({

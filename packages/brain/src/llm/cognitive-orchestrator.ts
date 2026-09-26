@@ -1,3 +1,4 @@
+import { CONTEXT_INSTRUCTIONS, contextualFallback, shortReplyKind, isGenericIntroduction, HistoryTurn } from '../triage/contextual-reply.js';
 import { GeminiClientPool, GeminiContentOptions } from '../generator/gemini-client.js';
 import { getBedrockClient } from '../generator/client-factory.js';
 import {
@@ -79,7 +80,10 @@ export class CognitiveOrchestrator {
   ): Promise<UserPerception> {
     const prompt = `Analyze this incoming Telegram message in the context of recent chat.
 Message text: "${message.text || '[Image/File]'}"
-Recent history: ${JSON.stringify(recentHistory.slice(-3))}
+Recent history: ${JSON.stringify(recentHistory)}
+
+${CONTEXT_INSTRUCTIONS}
+Short reply classification: ${shortReplyKind(message.text || '') || 'not a standalone short reply'}
 
 OUTPUT STRICT JSON ONLY:
 {
@@ -105,7 +109,7 @@ OUTPUT STRICT JSON ONLY:
     }
 
     return {
-      primaryIntent: 'general_support',
+      primaryIntent: shortReplyKind(message.text || '') || 'general_support',
       sentiment: 'neutral',
       urgency: 'medium',
       detectedDialect: this.detectDialectOffline(message.text || ''),
@@ -127,6 +131,8 @@ Tone: ${memory.ownerStyleGuide}
 Dialect to match: ${perception.detectedDialect}
 User Sentiment: ${perception.sentiment} (Address their emotional state calmly and authoritatively)
 User Intent: ${perception.primaryIntent}
+
+${CONTEXT_INSTRUCTIONS}
 
 NEGATIVE CONSTRAINTS (NEVER VIOLATE):
 - Current task reward is ₹2.50 per successfully sent message (never say ₹4 or other amounts).
@@ -160,15 +166,17 @@ ${memory.approvedExamples.map(e => `Q: "${e.userMessage}"\nA: "${e.approvedReply
     });
 
     try {
-      return await this.generate(command, {
+      const reply = await this.generate(command, {
         systemInstruction: systemPrompt,
         prompt: `Recent history: ${JSON.stringify(recentHistory)}\nUser message: ${message.text || '[Image]'}`,
         imageBuffer: message.mediaBuffer,
         imageMimeType: message.mediaMimeType,
       });
+      if (!reply.trim()) throw new Error('Empty synthesis');
+      return reply;
     } catch {
       console.warn('[AI] Synthesis unavailable; preparing a draft for verification.');
-      return this.generateKnowledgeFallback(message.text || '', perception.detectedDialect);
+      return this.generateKnowledgeFallback(message.text || '', perception.detectedDialect, recentHistory);
     }
   }
 
@@ -179,7 +187,7 @@ ${memory.approvedExamples.map(e => `Q: "${e.userMessage}"\nA: "${e.approvedReply
     const lower = text.toLowerCase();
     const hindiWords = [
       'kaise', 'karna', 'kare', 'karein', 'kya', 'hai', 'hain', 'ho', 'gaya', 'geya', 'aayega',
-      'nahi', 'mat', 'bhejo', 'paisa', 'batayein', 'batao', 'chahiye', 'kuch', 'hoga', 'mera',
+      'haan', 'acha', 'achha', 'thik', 'theek', 'samajh', 'nahi', 'mat', 'bhejo', 'paisa', 'batayein', 'batao', 'chahiye', 'kuch', 'hoga', 'mera',
       'meri', 'apna', 'bhai', 'sir', 'kabh', 'kitne', 'baar', 'bohot', 'sabse', 'yeh', 'woh'
     ];
     const words = lower.split(/\s+/);
@@ -188,7 +196,17 @@ ${memory.approvedExamples.map(e => `Q: "${e.userMessage}"\nA: "${e.approvedReply
     return 'en';
   }
 
-  private generateKnowledgeFallback(text: string, dialect: 'hi' | 'hinglish' | 'en'): string {
+  private fallbackDialect(text: string, history: HistoryTurn[], dialect: 'hi' | 'hinglish' | 'en'): 'hi' | 'hinglish' | 'en' {
+    if (shortReplyKind(text) && this.detectDialectOffline(text) === 'en') {
+      const previous = [...history].reverse().find(turn => turn.role === 'assistant' && turn.text.trim());
+      if (previous) return this.detectDialectOffline(previous.text);
+    }
+    return dialect;
+  }
+
+  private generateKnowledgeFallback(text: string, dialect: 'hi' | 'hinglish' | 'en', history: HistoryTurn[] = []): string {
+    const contextual = contextualFallback(text, history, this.fallbackDialect(text, history, dialect) === 'en');
+    if (contextual) return contextual;
     const lower = text.toLowerCase();
 
     // 1. Permanent WhatsApp ban / review unavailable appeal
@@ -278,7 +296,7 @@ ${memory.approvedExamples.map(e => `Q: "${e.userMessage}"\nA: "${e.approvedReply
     }
 
     // Greeting
-    if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
+    if (/^(hello|hi|hey)[!. ]*$/i.test(lower.trim())) {
       return dialect === 'en'
         ? 'Hello! How can I help you with LUMO tasks, withdrawals, or earning today?'
         : 'Namaste! LUMO tasks, withdrawal ya earning ke baare me main aapki kya sahayata kar sakta hoon?';
@@ -297,12 +315,16 @@ ${memory.approvedExamples.map(e => `Q: "${e.userMessage}"\nA: "${e.approvedReply
     candidateDraft: string,
     message: TelegramIncomingMessage,
     perception: UserPerception,
-    memory: MemoryContext
+    memory: MemoryContext,
+    recentHistory: HistoryTurn[] = []
   ): Promise<SelfCritique> {
     const prompt = `You are the chief compliance and quality auditor evaluating a proposed AI response.
 Incoming message: "${message.text || ''}"
 Proposed response: "${candidateDraft}"
 User sentiment: "${perception.sentiment}"
+Recent history: ${JSON.stringify(recentHistory)}
+Knowledge rules: ${JSON.stringify(memory.businessRules)}
+${CONTEXT_INSTRUCTIONS}
 
 AUDIT CHECKS:
 1. Hallucination: Does the response promise unauthorized features, wrong payout times (< 24h), or unverified facts?
@@ -370,12 +392,20 @@ OUTPUT STRICT JSON ONLY:
     const draftReply = await this.synthesizeDraft(message, perception, memory, recentHistory);
 
     // 3. Reflective Self-Critique
-    const critique = await this.selfCritique(draftReply, message, perception, memory);
+    const critique = await this.selfCritique(draftReply, message, perception, memory, recentHistory);
 
     // If critique produced a refined/corrected reply, use it
-    const finalReply = critique.revisedReply && critique.revisedReply.trim().length > 0
+    let finalReply = critique.revisedReply && critique.revisedReply.trim().length > 0
       ? critique.revisedReply
       : draftReply;
+
+    // A critique revision must not reintroduce the context-free greeting either.
+    if (!message.mediaBuffer && shortReplyKind(message.text || '') && isGenericIntroduction(finalReply)) {
+      finalReply = contextualFallback(message.text || '', recentHistory, this.fallbackDialect(message.text || '', recentHistory, perception.detectedDialect) === 'en')!;
+      critique.toneMatchesOwner = false;
+      critique.confidenceScore = 0;
+      critique.critiqueNotes = 'Generic introduction replaced with a contextual draft; human verification required.';
+    }
 
     return {
       perception,
